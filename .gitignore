@@ -30,3 +30,9 @@
 *.exe
 *.out
 *.app
+Sockfish/Sockfish.vcxproj
+Sockfish/Sockfish.sln
+Sockfish/Sockfish.vcxproj.filters
+Sockfish/Sockfish.vcxproj.user
+Sockfish/.vs
+Sockfish/x64
