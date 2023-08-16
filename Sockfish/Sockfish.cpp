@@ -15,18 +15,22 @@ using std::string;
 enum Side { black, white };
 enum playability { playable, unplayable, capture };
 
+class PieceType;
+
+PieceType* getPieceType(char c);
+
 class Position {
 public:
 	int x, y;
-	Position operator+(Position& p) {
+	Position operator+(const Position& p) {
 		return  { x + p.x, y + p.y };
 	}
 
-	Position operator-(Position& p) {
+	Position operator-(const Position& p) {
 		return  { x - p.x, y - p.y };
 	}
 
-	bool operator==(Position& p) {
+	bool operator==(const Position& p) {
 		return x == p.x && y == p.y;
 	}
 	bool isValidPosition() {
@@ -56,6 +60,8 @@ public:
 
 	Ability* next, * prev;
 	Position totalMovement;
+	PieceType* promotionType = NULL;
+
 
 private:
 	int16_t properties;
@@ -76,7 +82,7 @@ private:
 			totalMovement.y = input[posLen - 1] - '0';
 		}
 		if (!totalMovement.isValidMove()) {
-			std::cout << "Error: invalid move location '" << input[0] << input[1] << "'.";
+			std::cout << "Error: invalid move location '" << input[0] << input[1] << "'.\n";
 		}
 
 		int read = posLen;
@@ -91,6 +97,13 @@ private:
 			else if (c == 'f') {
 				properties |= ONLY_FIRST_MOVE;
 			}
+			else if (c == '=') {
+				if (read == input.size()) {
+					std::cout << "Error: move description ending with '=' (" << input << ")\n";
+				}
+				read++;
+				promotionType = getPieceType(input[read]);
+			}
 			else if (c == '>') {
 				break;
 			}
@@ -103,6 +116,7 @@ public:
 		properties = DIRECTLY_PLAYABLE;
 		next = NULL;
 		prev = NULL;
+		promotionType = NULL;
 	}
 
 	void fillPreviousness(Ability* prev) {
@@ -134,6 +148,31 @@ public:
 		return a;
 	}
 
+	static Ability* combine(const std::vector<Ability*>& in) {
+		int totalSize = in.size();
+		for (Ability* a : in) {
+			while (!a->hasProperty(LAST_OPTION)) {
+				totalSize++;
+				a++;
+			}
+		}
+		Ability* result = new Ability[totalSize];
+		int i = 0;
+		for (Ability* a : in) {
+			while (!a->hasProperty(LAST_OPTION)) {
+				result[i] = (*a);
+				i++;
+				a++;
+			}
+			result[i] = (*a);
+			result[i].properties ^= LAST_OPTION;
+			i++;
+		}
+		result[totalSize - 1].properties ^= LAST_OPTION;
+		result->fillPreviousness(NULL);
+		return result;
+	}
+
 	void del() {
 		for (Ability* ptr = this;; ptr++) {
 			if (ptr->next != NULL) {
@@ -155,6 +194,7 @@ public:
 		for (int i = 0; i < options; i++) {
 			a[i].totalMovement = og[i].totalMovement;
 			a[i].properties = og[i].properties;
+			a[i].promotionType = og[i].promotionType;
 			if (og[i].next != NULL) {
 				a[i].next = copy(og[i].next);
 			}
@@ -163,19 +203,42 @@ public:
 		return a;
 	}
 
-	void invertXY() {
+	void invertY() {
 		totalMovement.y = -totalMovement.y;
 		if (next != NULL) {
-			next->invertXY();
+			next->invertY();
 		}
 		if (!hasProperty(LAST_OPTION)) {
-			(this + 1)->invertXY();
+			(this + 1)->invertY();
 		}
 	}
 
-	bool hasProperty(int propertyConstant) {
+	void invertX() {
+		totalMovement.x = -totalMovement.x;
+		if (next != NULL) {
+			next->invertX();
+		}
+		if (!hasProperty(LAST_OPTION)) {
+			(this + 1)->invertX();
+		}
+	}
+
+	void rotate() {
+		int x = totalMovement.x;
+		totalMovement.x = -totalMovement.y;
+		totalMovement.y = x;
+		if (next != NULL) {
+			next->rotate();
+		}
+		if (!hasProperty(LAST_OPTION)) {
+			(this + 1)->rotate();
+		}
+	}
+
+	inline bool hasProperty(int propertyConstant) {
 		return properties & propertyConstant;
 	}
+
 	void print() {
 		std::cout << totalMovement.x << totalMovement.y;
 		if (next != NULL) {
@@ -189,7 +252,6 @@ public:
 			(this + 1)->print();
 		}
 	}
-
 
 	class MoveIterator {
 	private:
@@ -217,14 +279,33 @@ public:
 			return current;
 		}
 	};
-	
-	void testPrint() {
+
+	bool eq(const Ability* other) {
+		if (!(totalMovement == other->totalMovement) || properties != other->properties) {
+			return false;
+		}
+		if (next != NULL) {
+			if (other->next == NULL) {
+				return false;
+			}
+			if (!next->eq(other->next)) {
+				return false;
+			}
+		}
+		if (hasProperty(LAST_OPTION)) {
+			return true;
+		}
+		return (this + 1)->eq(other + 1);
+	}
+
+	void check() {
+		print();
+		std::cout << "\n";
 		MoveIterator iter = MoveIterator(this);
-		
-		do{
-			Ability* a = iter.get();
-			std::cout <<"(" << a->totalMovement.x << a->totalMovement.y << ")";
-		} while (iter.next(playable) != NULL);
+		while (iter.get() != NULL) {
+			std::cout << "(" << iter.get()->totalMovement.x << "," << iter.get()->totalMovement.y << ") ";
+			iter.next(playable);
+		}
 		std::cout << "\n";
 	}
 };
@@ -240,21 +321,21 @@ public:
 		this->id = id;
 		this->ability = ability;
 		this->invertedAbility = Ability::copy(ability);
-		invertedAbility->invertXY();
+		invertedAbility->invertY();
 		this->isKing = isKing;
 		estimatedValue = value;
 	}
 };
 
-std::vector<PieceType> pieceTypes;
+std::vector<PieceType*> pieceTypes;
 
-bool isPiece(char c) {
-	for (auto i = pieceTypes.begin(); i < pieceTypes.end(); i++) {
-		if (i->id == c) {
-			return true;
+PieceType* getPieceType(char c) {
+	for (int i = 0; i < pieceTypes.size();i++) {
+		if (pieceTypes[i]->id == c) {
+			return pieceTypes[i];
 		}
 	}
-	return false;
+	return NULL;
 }
 
 class Piece {
@@ -267,31 +348,34 @@ public:
 	bool isKing;
 	float materialValue;
 	bool alive = true;
+	int search_bestMoveCount;
+	PieceType* pieceType;
 
-	Piece(Position pos) {
+	Piece(PieceType* t, Position pos, Side side) {
 		ability = NULL;
 		position = pos;
-		side = white;
 		type = ' ';
 		hasMoved = false;
 		isKing = false;
+		search_bestMoveCount = 0;
+		materialValue = 0;
+		type = NULL;
+
+		this->side = side;
+		updateType(t);
 	}
 
-	Piece() {
-		Piece({ 0,0 });
+	void updateType(PieceType *t) {
+		ability = side == white ? t->ability : t->invertedAbility;
+		type = t->id;
+		materialValue = t->estimatedValue;
+		pieceType = t;
 	}
 
 	static Piece* create(char typeId, Side side) {
-		PieceType* t = NULL;
-		for (auto i = pieceTypes.begin(); i < pieceTypes.end(); i++) {
-			if (i->id == typeId) {
-				Piece* p = new Piece();
-				p->side = side;
-				p->ability = side == white ? i->ability : i->invertedAbility;
-				p->type = typeId;
-				p->materialValue = i->estimatedValue;
-				return p;
-			}
+		PieceType* t = getPieceType(typeId);
+		if (t != NULL) {
+			return new Piece(t, { 0,0 }, side);
 		}
 		std::cout << "Error: no piece found with identifier '" << typeId << "'\n";
 		return NULL;
@@ -309,6 +393,7 @@ public:
 		Piece* captured;
 		bool hasMovedBefore;
 		int positionalEvalBefore;
+		PieceType* promotedFrom;
 	};
 
 	Piece* squares[64];
@@ -325,10 +410,14 @@ public:
 		}
 	}
 
-	void makeMove(Position from, Position to) {
+	void makeMove(Position from, Ability *ability) {
+		Position to = from + ability->totalMovement;
 		int fai = from.toArrayIndex(), tai = to.toArrayIndex();
 		Piece* target = squares[tai];
-		moveHistory.push({ from, to, target, squares[fai]->hasMoved , materialWhite - materialBlack });
+		moveHistory.push({ from, to, target, squares[fai]->hasMoved , materialWhite - materialBlack, squares[fai]->pieceType });
+		if ((to.y == 7 || to.y == 0) && ability->promotionType!=NULL) {
+			squares[fai]->updateType(ability->promotionType);
+		}
 		squares[fai]->move(to);
 		squares[fai]->hasMoved = true;
 
@@ -357,6 +446,9 @@ public:
 		squares[tai]->move(move.from);
 		squares[fai] = squares[tai];
 		squares[fai]->hasMoved = move.hasMovedBefore;
+		if (squares[fai]->pieceType != move.promotedFrom) {
+			squares[fai]->updateType(move.promotedFrom);
+		}
 		squares[tai] = move.captured;
 		positionalEval = move.positionalEvalBefore;
 		if (move.captured != NULL) {
@@ -404,7 +496,7 @@ public:
 				if ('0' < c && c <= '9') {
 					rowSize += c - '1';
 				}
-				else if (!isPiece(tolower(c))) {
+				else if (getPieceType(tolower(c))==NULL) {
 					std::cout << "Error: no piece found with identifier " << c<<'\n';
 				}
 			}
@@ -512,7 +604,7 @@ public:
 		return capture;
 	}
 
-	bool searchPlayability(Position from, Ability* a, Position displacement) {
+	Ability* searchPlayability(Position from, Ability* a, Position displacement) {
 
 		Ability::MoveIterator iter = Ability::MoveIterator(a);
 		while (iter.get() != NULL) {
@@ -520,51 +612,92 @@ public:
 
 			playability check = isPlayable(current, from);
 			if (check != unplayable && current->totalMovement == displacement) {
-				return true;
+				return current;
 			}
 			iter.next(check);
 		}
-		return false;
+		return NULL;
 	}
 
-	bool isPlayable(Position from, Position to) {
+	Ability* isPlayable(Position from, Position to) {
 		if (!from.isValidPosition() || !to.isValidPosition()) {
-			return false;
+			return NULL;
 		}
 		Piece* p = squares[from.toArrayIndex()];
 		if (p == NULL) {
-			return false;
+			return NULL;
 		}
 		return searchPlayability(from, p->ability, to - from);
 	}
 
 	bool parseMove(string in) {
+		if (in == "takeback") {
+			unmakeMove();
+			unmakeMove();
+			return false;
+		}
+		std::vector<std::string> words = splitOffFirstWord(in, ' ');
+		if (words[0] == "fen") {
+			if (words.size() != 2) {
+				std::cout << "error";
+				return false;
+			}
+			loadFen(words[1]);
+		}
+
 		int x1, y1, x2, y2;
 		x1 = toupper( in[0] ) - 'A';
 		y1 = in[1] - '0'-1;
 		x2 = toupper(in[2]) - 'A';
 		y2 = in[3] - '0'-1;
-		if (!isPlayable({ x1,y1 }, { x2,y2 })) {
+		Ability* p = isPlayable({ x1,y1 }, { x2,y2 });
+		if (p==NULL) {
 			std::cout << "that's not even a move, bozo\n";
 			return false;
 		}
-		makeMove({ x1,y1 }, { x2,y2 });
+		makeMove({ x1,y1 }, p);
 		return true;
 	}
 
 	struct evaluation {
 		float value;
-		Position bestMoveFrom, bestMoveTo;
+		Piece* bestMoveFrom;
+		Ability* bestMove;
 	};
 
 	evaluation alphaBeta(int depth, Side toPlay, float alpha, float beta) {
 		if (depth == 0) {
 			// todo: some basic eval function
 			float material = materialWhite - materialBlack;// +positionalEval;
-			return { material , {-1,-1}, {-1,-1} };
+
+			float movesWhite = 0;
+			for (Piece* piece : piecesWhite) {
+				if (piece->alive) {
+					Ability::MoveIterator iter = Ability::MoveIterator(piece->ability);
+					Ability* current;
+					while ((current = iter.get()) != NULL) {
+						playability play = isPlayable(current, piece->position);
+						iter.next(play);
+						movesWhite++;
+					}
+				}
+			}
+			float movesBlack = 0;
+			for (Piece* piece : piecesBlack) {
+				if (piece->alive) {
+					Ability::MoveIterator iter = Ability::MoveIterator(piece->ability);
+					Ability* current;
+					while ((current=iter.get()) != NULL) {
+						playability play = isPlayable(current, piece->position);
+						iter.next(play);
+						movesBlack++;
+					}
+				}
+			}
+			return { material +(movesWhite-movesBlack)/10, NULL, NULL };
 		}
 
-		evaluation best = { toPlay == white ? -INFINITY : INFINITY , {-1,-1}, {-1,-1} };
+		evaluation best = { toPlay == white ? -INFINITY : INFINITY , NULL,NULL };
 
 		std::vector<Piece*>& pieces = toPlay == white ? piecesWhite : piecesBlack;
 
@@ -576,13 +709,14 @@ public:
 					playability play = isPlayable(current, piece->position);
 					if (play != unplayable && current->hasProperty(current->DIRECTLY_PLAYABLE)) {
 						Position from = piece->position, to = piece->position + current->totalMovement;
-						makeMove(from, to);
+						makeMove(from, current);
 						// todo: special actions (castling, leaving en passant)
 
 						if (toPlay == white) {
 							float value = alphaBeta(depth - 1, black, alpha, beta).value;
 							if (value > best.value) {
-								best = { value, from, to };
+								best = { value, piece, current };
+								piece->search_bestMoveCount++;
 							}
 							if (value > beta) {
 								unmakeMove();
@@ -595,7 +729,8 @@ public:
 						else {
 							float value = alphaBeta(depth - 1, white, alpha, beta).value;
 							if (value < best.value) {
-								best = { value, from, to };
+								best = { value, piece, current };
+								piece->search_bestMoveCount++;
 							}
 							if (value < alpha) {
 								unmakeMove();
@@ -615,42 +750,140 @@ public:
 		}
 		return best;
 	}
+
+	void resetSearchData() {
+		for (Piece* p : piecesBlack) {
+			p->search_bestMoveCount = 0;
+		}
+		for (Piece* p : piecesWhite) {
+			p->search_bestMoveCount = 0;
+		}
+	}
+
+	evaluation RunAi(int maxDepth, Side toPlay) {
+		for (int i = 1; i < maxDepth; i++) {
+			resetSearchData();
+			alphaBeta(i, toPlay, -INFINITY, INFINITY);
+			std::sort(piecesBlack.begin(), piecesBlack.end(), [](const Piece* a, const Piece* b) {return a->search_bestMoveCount > b->search_bestMoveCount; });
+			std::sort(piecesWhite.begin(), piecesWhite.end(), [](const Piece* a, const Piece* b) {return a->search_bestMoveCount > b->search_bestMoveCount; });
+		}
+		return alphaBeta(maxDepth, toPlay, -INFINITY, INFINITY);
+	}
 };
+
+Ability* makePieceType(std::string in) {
+	// this does not really need to be efficient
+	auto words = splitOffFirstWord(in, ' ');
+	if (words[0] == "mirror") {
+		if (words.size() != 2) {
+			std::cout << "error parsing piece with properties '" << in << "'";
+			return NULL;
+		}
+		auto props = splitOffFirstWord(words[1], ' ');
+		if (props.size() != 2 || props[0].size() > 2) {
+			std::cout << "error parsing piece with properties '" << in << "'";
+			return NULL;
+		}
+		Ability* a = Ability::parseString(props[1]);
+		if (a == NULL) {
+			std::cout << "error parsing piece with properties '" << in << "'";
+			return NULL;
+		}
+		std::vector<Ability*> parts;
+		parts.push_back(a);
+		if (sharesChars(props[0], "Xx")) {
+			Ability* b = Ability::copy(a);
+			b->invertX();
+			parts.push_back(b);
+		}
+		if (sharesChars(props[0], "Yy")) {
+			Ability* c = Ability::copy(a);
+			c->invertY();
+			parts.push_back(c);
+
+			if (sharesChars(props[0], "Xx")) {
+				Ability* d = Ability::copy(c);
+				d->invertX();
+				parts.push_back(d);
+			}
+		}
+
+		Ability* result = Ability::combine(parts);
+		for (Ability* part : parts) {
+			delete[] part;
+		}
+		return result;
+	}
+	if (words[0] == "symmetric") {
+		if (words.size() != 2) {
+			std::cout << "error parsing piece with properties '" << in << "'";
+			return NULL;
+		}
+		Ability* a = Ability::parseString(words[1]);
+		if (a == NULL) {
+			std::cout << "error parsing piece with properties '" << in << "'";
+			return NULL;
+		}
+		std::vector<Ability*> parts;
+		parts.push_back(a);
+		for (int i = 0; i < 3; i++) {
+			Ability* b = Ability::copy(a);
+			a->rotate();
+			parts.push_back(b);
+		}
+		Ability* result = Ability::combine(parts);
+		for (Ability* part : parts) {
+			delete[] part;
+		}
+		return result;
+	}
+	Ability* a = Ability::parseString(in);
+	return a;
+}
 
 int main()
 {
-	Ability* pawn = Ability::parseString("01n>02nf,11c,-11c");
 
-	Ability* bishop = Ability::parseString("11>22>33>44>55>66>77,  -1-1>-2-2>-3-3>-4-4>-5-5>-6-6>-7-7,  -11>-22>-33>-44>-55>-66>-77,  1-1>2-2>3-3>4-4>5-5>6-6>7-7");
+	Ability* bishop = makePieceType("symmetric 11>22>33>44>55>66>77");
+	pieceTypes.push_back(new PieceType('b', bishop, false, 3));
 
-	Ability* king = Ability::parseString("11,10,01,-11,0-1,-10,-1-1,1-1");
+	Ability* king = makePieceType("symmetric 11,10");
+	pieceTypes.push_back(new PieceType('k', king, true, 100));
 
-	Ability* horse = Ability::parseString("12,21,-12,-21,1-2,2-1,-1-2,-2-1");
+	Ability* horse = makePieceType("symmetric 12,21");
+	pieceTypes.push_back(new PieceType('n', horse, false, 3));
 
-	Ability* queen = Ability::parseString("11>22>33>44>55>66>77,  -1-1>-2-2>-3-3>-4-4>-5-5>-6-6>-7-7,  -11>-22>-33>-44>-55>-66>-77,  1-1>2-2>3-3>4-4>5-5>6-6>7-7,  10>20>30>40>50>60>70,  -10>-20>-30>-40>-50>-60>-70,  01>02>03>04>05>06>07,  0-1>0-2>0-3>0-4>0-5>0-6>0-7");
+	Ability* queen = makePieceType("symmetric 11>22>33>44>55>66>77,  01>02>03>04>05>06>07");
+	pieceTypes.push_back(new PieceType('q', queen, false, 9));
 
-	Ability* rook = Ability::parseString("10>20>30>40>50>60>70,  -10>-20>-30>-40>-50>-60>-70,  01>02>03>04>05>06>07,  0-1>0-2>0-3>0-4>0-5>0-6>0-7");
+	Ability* rook = makePieceType("symmetric 10>20>30>40>50>60>70");
+	pieceTypes.push_back(new PieceType('r', rook, false, 5));
 
-	pieceTypes.push_back(PieceType('p', pawn, false, 1));
-	pieceTypes.push_back(PieceType('b', bishop, false, 3));
-	pieceTypes.push_back(PieceType('k', king, true, 100));
-	pieceTypes.push_back(PieceType('q', queen, false, 9));
-	pieceTypes.push_back(PieceType('n', horse, false, 3));
-	pieceTypes.push_back(PieceType('r', rook, false, 5));
+	Ability* pawn = makePieceType("01n=q>02nf,11c=q,-11c=q");
+	pieceTypes.push_back(new PieceType('p', pawn, false, 1));
+
+	bishop->check();
+	king->check();
+	horse->check();
+	queen->check();
+	std::cout << "\n\n";
+
 
 	Board b;
 	b.loadFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR - - - - -");
-	//b.loadFen("r1b1k2r/p1p2ppp/pbn5/3p4/RP2n2q/2p1P3/5PPP/1NBQKBNR - - - - -");
+	//b.loadFen("rnbqkbnr/8/8/8/8/8/8/RNBQKBNR - - - - -");
+
 	constexpr int depth = 6;
 	while (1 == 1) {
 		std::cout << "zero-depth eval: " << b.alphaBeta(0, white, -INFINITY, INFINITY).value << "\n";
 
 
-		Board::evaluation eval = b.alphaBeta(depth, white, -INFINITY, INFINITY);
-		std::cout << "alphabeta eval: " << eval.value << " " << eval.bestMoveFrom.x << eval.bestMoveFrom.y << eval.bestMoveTo.x << eval.bestMoveTo.y << '\n';
+		//Board::evaluation eval = b.alphaBeta(depth, white, -INFINITY, INFINITY);
+		Board::evaluation eval = b.RunAi(depth, white);
+		std::cout << "alphabeta eval: " << eval.value << " " << '\n';
 
 
-		b.makeMove(eval.bestMoveFrom, eval.bestMoveTo);
+		b.makeMove(eval.bestMoveFrom->position, eval.bestMove);
 		b.print();
 		string s; 
 		std::getline(std::cin, s);

@@ -16,6 +16,21 @@ std::vector<string> split(string input, char delim) {
 	return result;
 }
 
+std::vector<string> splitOffFirstWord(string input, char delim) {
+	std::vector<string> result;
+	int begin = 0;
+	bool done = false;
+	for (int i = 0; i < input.size(); i++) {
+		if (!done && input[i] == delim) {
+			result.push_back(input.substr(begin, i - begin));
+			begin = i + 1;
+			done = true;
+		}
+	}
+	result.push_back(input.substr(begin));
+	return result;
+}
+
 // returns the number of chars between the opening bracket at param "index" and its closing bracket.
 // -1 if there is no closing bracket, -2 if there is no opening bracket at the index.
 int getBracketLength(string input, int index) {
