@@ -6,13 +6,15 @@
 #include<istream>
 #include <sstream>
 #include<vector>
+#include<unordered_map>
+#include<chrono>
 #include "StringStuff.h"
 #include "ColorOut.h"
 #include "libs/color-console-master/include/color.hpp"
+#include "Zobrist.h"
 
 using std::string;
 
-enum Side { black, white };
 enum playability { playable, unplayable, capture };
 
 class PieceType;
@@ -340,42 +342,41 @@ PieceType* getPieceType(char c) {
 
 class Piece {
 public:
-	char type;
-	Side side;
+	char typeId;
+	bool isBlack;
 	Ability* ability;
 	Position position;
 	bool hasMoved;
 	bool isKing;
 	float materialValue;
 	bool alive = true;
-	int search_bestMoveCount;
+	int search_valueIfMoves;
 	PieceType* pieceType;
 
-	Piece(PieceType* t, Position pos, Side side) {
+	Piece(PieceType* t, Position pos, bool black) {
 		ability = NULL;
 		position = pos;
-		type = ' ';
+		typeId = ' ';
 		hasMoved = false;
-		isKing = false;
-		search_bestMoveCount = 0;
+		isKing = t->isKing;
+		search_valueIfMoves = 0;
 		materialValue = 0;
-		type = NULL;
 
-		this->side = side;
+		isBlack = black;
 		updateType(t);
 	}
 
 	void updateType(PieceType *t) {
-		ability = side == white ? t->ability : t->invertedAbility;
-		type = t->id;
+		ability = isBlack ? t->invertedAbility: t->ability;
+		typeId = t->id;
 		materialValue = t->estimatedValue;
 		pieceType = t;
 	}
 
-	static Piece* create(char typeId, Side side) {
+	static Piece* create(char typeId, bool black) {
 		PieceType* t = getPieceType(typeId);
 		if (t != NULL) {
-			return new Piece(t, { 0,0 }, side);
+			return new Piece(t, { 0,0 }, black);
 		}
 		std::cout << "Error: no piece found with identifier '" << typeId << "'\n";
 		return NULL;
@@ -383,6 +384,10 @@ public:
 
 	void move(Position pos) {
 		position = pos;
+	}
+
+	uint64_t hash() {
+		return getHash(typeId, position.toArrayIndex(), isBlack, hasMoved);
 	}
 };
 
@@ -403,6 +408,56 @@ public:
 	int materialWhite=0, materialBlack=0;
 	bool whiteWon = false, blackWon = false;
 	int positionalEval = 0;
+	uint64_t hash = 0;
+	int move = 0;
+	bool blackToPlay = false;
+	static constexpr float MATE = 10000;
+	static inline bool isMate(int eval) {
+		return eval > 1000 || eval < -1000;
+	}
+
+	struct evaluation {
+		float value;
+		Piece* bestMoveFrom;
+		Ability* bestMove;
+	};
+
+	struct Transposition {
+		int depth;
+		int move;
+		evaluation eval;
+		//string fen;
+	};
+
+	std::unordered_map<uint64_t, Transposition> transpositionTable;
+
+	string fen() {
+		string result = "";
+		for (int i = 0; i < 8; i++) {
+			int empty = 0;
+			for (int j = 0; j < 8; j++) {
+				Piece* sq = squares[Position{ j, 7 - i }.toArrayIndex()];
+				if (sq == NULL) {
+					empty++;
+				}
+				else {
+					if (empty != 0) {
+						result.append(std::to_string(empty));
+						empty = 0;
+					}
+					result += sq->isBlack ?  sq->typeId : std::toupper(sq->typeId);
+				}
+			}
+			if (empty != 0) {
+				result.append(std::to_string(empty));
+				empty = 0;
+			}
+			if (i < 7) {
+				result += '/';
+			}
+		}
+		return result;
+	}
 
 	Board() {
 		for (int i = 0; i < 64; i++) {
@@ -411,77 +466,100 @@ public:
 	}
 
 	void makeMove(Position from, Ability *ability) {
+		move++;
+		blackToPlay = !blackToPlay;
+		hash ^= getPlayerHash();
 		Position to = from + ability->totalMovement;
 		int fai = from.toArrayIndex(), tai = to.toArrayIndex();
-		Piece* target = squares[tai];
-		moveHistory.push({ from, to, target, squares[fai]->hasMoved , materialWhite - materialBlack, squares[fai]->pieceType });
+		Piece* target = squares[tai], *moving=squares[fai];
+
+		hash ^= moving->hash();
+
+		moveHistory.push({ from, to, target, moving->hasMoved , materialWhite - materialBlack, moving->pieceType });
+
 		if ((to.y == 7 || to.y == 0) && ability->promotionType!=NULL) {
-			squares[fai]->updateType(ability->promotionType);
+			moving->updateType(ability->promotionType);
 		}
-		squares[fai]->move(to);
-		squares[fai]->hasMoved = true;
+		moving->move(to);
+		moving->hasMoved = true;
 
 		if (target!= NULL) {
-			if (target->side == white) {
-				materialWhite -= target->materialValue;
-				blackWon = target->isKing;
-			}
-			else {
+			hash ^= target->hash();
+			if (target->isBlack) {
 				materialBlack -= target->materialValue;
 				whiteWon = target->isKing;
+			}
+			else {
+				materialWhite -= target->materialValue;
+				blackWon = target->isKing;
 			}
 			target->alive = false;
 		}
 
 		//positionalEval += 100 * (whiteWon - blackWon);
 		
-		squares[tai] = squares[fai];
+		squares[tai] = moving;
 		squares[fai] = NULL;
+
+		hash ^= moving->hash();
 	}
 
 	void unmakeMove() {
+		move--;
+		blackToPlay = !blackToPlay;
+		hash ^= getPlayerHash();
 		MoveRecord move = moveHistory.top();
 		moveHistory.pop();
 		int fai = move.from.toArrayIndex(), tai = move.to.toArrayIndex();
-		squares[tai]->move(move.from);
-		squares[fai] = squares[tai];
-		squares[fai]->hasMoved = move.hasMovedBefore;
-		if (squares[fai]->pieceType != move.promotedFrom) {
-			squares[fai]->updateType(move.promotedFrom);
+		Piece* moving = squares[tai];
+
+		hash ^= moving->hash();
+
+		moving->move(move.from);
+		squares[fai] = moving;
+		moving->hasMoved = move.hasMovedBefore;
+
+		if (moving->pieceType != move.promotedFrom) {
+			moving->updateType(move.promotedFrom);
 		}
 		squares[tai] = move.captured;
 		positionalEval = move.positionalEvalBefore;
 		if (move.captured != NULL) {
 			Piece* p = move.captured;
-			if (p->side == white) {
-				materialWhite += p->materialValue;
-				blackWon = false;
-			}
-			else {
+			hash ^= p->hash();
+			if (p->isBlack) {
 				materialBlack += p->materialValue;
 				whiteWon = false;
 			}
+			else {
+				materialWhite += p->materialValue;
+				blackWon = false;
+			}
 			p->alive = true;
 		}
+		hash ^= moving->hash();
 	}
 
 
-	void addPiece(Position pos, char id, Side side) {
-		Piece* p = Piece::create(id, side);
+	void addPiece(Position pos, char id, bool isBlack) {
+		Piece* p = Piece::create(id, isBlack);
 		if (p == NULL)return;
 		p->move(pos);
 		squares[pos.toArrayIndex()] = p;
-		if (side == white) {
-			piecesWhite.push_back(p);
-			materialWhite += p->materialValue;
-		}
-		else {
+		if (isBlack) {
 			piecesBlack.push_back(p);
 			materialBlack += p->materialValue;
 		}
+		else {
+			piecesWhite.push_back(p);
+			materialWhite += p->materialValue;
+		}
+		hash ^= p->hash();
 	}
 
 	void loadFen(string fen) {
+		whiteWon = false;
+		blackWon = false;
 		std::vector<string> fields = split(fen, ' ');
 		if (fields.size() != 6) {
 			std::cout << "Error: fen should have 6 fields separated by spaces\n";
@@ -523,13 +601,13 @@ public:
 					placing.x += c-'0';
 				}
 				else {
-					Side side = black;
+					bool black=true;
 					char lowercase = c;
 					if (isupper(c)) {
 						lowercase = tolower(c);
-						side = white;
+						black=false;
 					}
-					addPiece(placing, lowercase, side);
+					addPiece(placing, lowercase, black);
 					placing.x++;
 				}
 			}
@@ -549,7 +627,10 @@ public:
 			for (int j = 0; j < 8; j++) {
 				int pieceIndex = Position{ j,i }.toArrayIndex();
 				//std::cout << "|";
-				if ((i + j) % 2 == 1) {
+				auto lastMove = moveHistory.top();
+				if (lastMove.from == Position{j, i} || lastMove.to == Position{j, i}) {
+					std::cout << hue::on_light_yellow;
+				}else if ((i + j) % 2 == 0) {
 					std::cout << hue::on_grey;
 				}
 				else {
@@ -559,11 +640,11 @@ public:
 					std::cout << "   ";
 				}
 				else {
-					if (squares[pieceIndex]->side == white) {
-						std::cout << hue::red << " " << (char)( squares[pieceIndex]->type + 'A' - 'a') << " ";
+					if (squares[pieceIndex]->isBlack) {
+						std::cout << hue::light_green << " " << (char)(squares[pieceIndex]->typeId) << " ";
 					}
 					else {
-						std::cout << hue::light_green <<" " << (char)(squares[pieceIndex]->type) << " ";
+						std::cout << hue::red << " " << (char)(squares[pieceIndex]->typeId + 'A' - 'a') << " ";
 					}
 				}
 				std::cout << hue::reset;
@@ -579,7 +660,7 @@ public:
 		if (actor == NULL || (actor->hasMoved && a->hasProperty(a->ONLY_FIRST_MOVE))) {
 			return unplayable;
 		}
-		Side side = actor->side;
+		bool blackMove = actor->isBlack;
 		Position to = startingSquare + a->totalMovement;
 		int targetIndex = to.toArrayIndex();
 		if (!to.isValidPosition()) {
@@ -594,7 +675,7 @@ public:
 			return playable;
 		}
 
-		if (target->side == side) {
+		if (target->isBlack == blackMove) {
 			return unplayable;
 		}
 
@@ -643,6 +724,7 @@ public:
 				return false;
 			}
 			loadFen(words[1]);
+			return true;
 		}
 
 		int x1, y1, x2, y2;
@@ -659,13 +741,46 @@ public:
 		return true;
 	}
 
-	struct evaluation {
-		float value;
-		Piece* bestMoveFrom;
-		Ability* bestMove;
-	};
+	void storeTransposition(Transposition trans) {
+		transpositionTable[hash] = trans;
+	}
 
-	evaluation alphaBeta(int depth, Side toPlay, float alpha, float beta) {
+	int maxMoveReached = 0;
+
+	Transposition* getTransposition() {
+		auto found = transpositionTable.find(hash);
+		if (found == transpositionTable.end()) {
+			return NULL;
+		}
+
+		float& eval = found->second.eval.value;
+		int &m = found->second.move;
+		if (isMate(eval) && m!=move) {
+			if (eval < 0) {
+				eval += move-m;
+			}
+			else {
+				eval -= move-m;
+			}
+			m = move;
+		}
+		return &found->second;
+	}
+
+	//testing fen 2b4r/p4pkp/6p1/3p2P1/7N/2BP4/PPP3rK/RN5R - - - - -
+	evaluation alphaBeta(int depth, float alpha, float beta) {
+		if (blackWon || whiteWon) {
+			return { (blackWon ? -MATE+move : MATE-move) , NULL, NULL};
+		}
+
+		Transposition* done = getTransposition();
+		//if (done!=NULL && done->fen != fen()) {
+		//	std::cout << "hash collision\n";
+		//}
+		if (done!=NULL && done->depth >= depth) {
+			return done->eval;
+		}
+
 		if (depth == 0) {
 			// todo: some basic eval function
 			float material = materialWhite - materialBlack;// +positionalEval;
@@ -697,9 +812,10 @@ public:
 			return { material +(movesWhite-movesBlack)/10, NULL, NULL };
 		}
 
-		evaluation best = { toPlay == white ? -INFINITY : INFINITY , NULL,NULL };
+		evaluation best = { blackToPlay ? INFINITY : -INFINITY , NULL,NULL };
 
-		std::vector<Piece*>& pieces = toPlay == white ? piecesWhite : piecesBlack;
+		std::vector<Piece*>& pieces = blackToPlay ? piecesBlack : piecesWhite;
+		bool couldBeStalemate=true;
 
 		for (Piece* piece : pieces) {
 			if (piece->alive) {
@@ -710,15 +826,19 @@ public:
 					if (play != unplayable && current->hasProperty(current->DIRECTLY_PLAYABLE)) {
 						Position from = piece->position, to = piece->position + current->totalMovement;
 						makeMove(from, current);
+
 						// todo: special actions (castling, leaving en passant)
 
-						if (toPlay == white) {
-							float value = alphaBeta(depth - 1, black, alpha, beta).value;
+						if (blackToPlay) {
+							float value = alphaBeta(depth - 1, alpha, beta).value;
+							if (value != -MATE+move+2) {
+								couldBeStalemate = false;
+							}
 							if (value > best.value) {
 								best = { value, piece, current };
-								piece->search_bestMoveCount++;
+								piece->search_valueIfMoves++;
 							}
-							if (value > beta) {
+							if (value >= beta) {
 								unmakeMove();
 								return best;
 							}
@@ -727,12 +847,15 @@ public:
 							}
 						}
 						else {
-							float value = alphaBeta(depth - 1, white, alpha, beta).value;
+							float value = alphaBeta(depth - 1, alpha, beta).value;
+							if (value != MATE - move - 2) {
+								couldBeStalemate = false;
+							}
 							if (value < best.value) {
 								best = { value, piece, current };
-								piece->search_bestMoveCount++;
+								piece->search_valueIfMoves++;
 							}
-							if (value < alpha) {
+							if (value <= alpha) {
 								unmakeMove();
 								return best;
 							}
@@ -740,34 +863,50 @@ public:
 								beta = value;
 							}
 						}
-
-
 						unmakeMove();
 					}
 					iter.next(play);
 				}
 			}
 		}
+		if (couldBeStalemate) {
+			hash ^= getPlayerHash();
+			blackToPlay = !blackToPlay;
+			if(!isMate(alphaBeta(1,-INFINITY,INFINITY).value)){
+				best = { 0.f, NULL, NULL };
+			}
+			hash ^= getPlayerHash();
+			blackToPlay = !blackToPlay;
+		}
+		//storeTransposition( { depth, move, best, fen() });
+		storeTransposition({ depth, move, best });
 		return best;
 	}
 
 	void resetSearchData() {
 		for (Piece* p : piecesBlack) {
-			p->search_bestMoveCount = 0;
+			p->search_valueIfMoves = 0;
 		}
 		for (Piece* p : piecesWhite) {
-			p->search_bestMoveCount = 0;
+			p->search_valueIfMoves = 0;
 		}
+		//transpositionTable.clear();
 	}
 
-	evaluation RunAi(int maxDepth, Side toPlay) {
-		for (int i = 1; i < maxDepth; i++) {
+	evaluation RunAi(int maxDepth) {
+		double elapsedUs = 0;
+		auto start = std::chrono::system_clock::now();
+		evaluation currentEval;
+		int i = 0;
+		for (; i <= maxDepth && elapsedUs<1000000; i++) {
 			resetSearchData();
-			alphaBeta(i, toPlay, -INFINITY, INFINITY);
-			std::sort(piecesBlack.begin(), piecesBlack.end(), [](const Piece* a, const Piece* b) {return a->search_bestMoveCount > b->search_bestMoveCount; });
-			std::sort(piecesWhite.begin(), piecesWhite.end(), [](const Piece* a, const Piece* b) {return a->search_bestMoveCount > b->search_bestMoveCount; });
+			currentEval=alphaBeta(i, -INFINITY, INFINITY);
+			//std::sort(piecesBlack.begin(), piecesBlack.end(), [](const Piece* a, const Piece* b) {return a->search_valueIfMoves > b->search_valueIfMoves; });
+			//std::sort(piecesWhite.begin(), piecesWhite.end(), [](const Piece* a, const Piece* b) {return a->search_valueIfMoves > b->search_valueIfMoves; });
+			elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now() - start).count();
 		}
-		return alphaBeta(maxDepth, toPlay, -INFINITY, INFINITY);
+		std::cout << "searched to depth " << i << " in " << elapsedUs/1000000 << " s\n";
+		return currentEval;
 	}
 };
 
@@ -843,6 +982,7 @@ Ability* makePieceType(std::string in) {
 
 int main()
 {
+	zobristInit();
 
 	Ability* bishop = makePieceType("symmetric 11>22>33>44>55>66>77");
 	pieceTypes.push_back(new PieceType('b', bishop, false, 3));
@@ -862,25 +1002,29 @@ int main()
 	Ability* pawn = makePieceType("01n=q>02nf,11c=q,-11c=q");
 	pieceTypes.push_back(new PieceType('p', pawn, false, 1));
 
-	bishop->check();
-	king->check();
-	horse->check();
-	queen->check();
+	//bishop->check();
+	//king->check();
+	//horse->check();
+	//queen->check();
 	std::cout << "\n\n";
 
 
 	Board b;
-	b.loadFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR - - - - -");
+	//b.loadFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR - - - - -"); // default
 	//b.loadFen("rnbqkbnr/8/8/8/8/8/8/RNBQKBNR - - - - -");
+	//b.loadFen("R1K5/8/8/8/8/5k2/8/8 - - - - -"); // rook mate
+	b.loadFen("NBK5/8/8/8/8/5k2/8/8 - - - - -"); // bishop knight mate
+	std::cout << b.fen()<<"\n";
 
-	constexpr int depth = 6;
+	constexpr int depth = 100;
 	while (1 == 1) {
-		std::cout << "zero-depth eval: " << b.alphaBeta(0, white, -INFINITY, INFINITY).value << "\n";
+		std::cout << "zero-depth eval: " << b.alphaBeta(0, -INFINITY, INFINITY).value << "\n";
 
 
 		//Board::evaluation eval = b.alphaBeta(depth, white, -INFINITY, INFINITY);
-		Board::evaluation eval = b.RunAi(depth, white);
+		Board::evaluation eval = b.RunAi(depth);
 		std::cout << "alphabeta eval: " << eval.value << " " << '\n';
+		std::cout << b.hash << '\n';
 
 
 		b.makeMove(eval.bestMoveFrom->position, eval.bestMove);
