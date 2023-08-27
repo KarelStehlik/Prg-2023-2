@@ -12,6 +12,7 @@
 #include "ColorOut.h"
 #include "libs/color-console-master/include/color.hpp"
 #include "Zobrist.h"
+#include "Docs.h"
 
 using std::string;
 
@@ -52,6 +53,9 @@ public:
 
 Position INVALID_POSITION = { -8888, 69420 };
 
+// Abilities dictate how a piece moves. They are stored in a tree.
+// Alternative abilities (eg. rook +(1,0), +(0,1), are stored in continuous memory, terminating in one with the LAST_OPTION flag.)
+// abilities which may be played if the previous one didn't capture anything (eg. bishop +(1,1) -> +(2,2), are stored in next)
 class Ability {
 public:
 	constexpr static int CONDITION_CAPTURE_ONLY = 1;
@@ -131,50 +135,53 @@ public:
 		}
 	}
 
-	static Ability* parseString(string input) {
-		string in = delChars(input, ' ');
-		if (in[0] == '(') {
-			in = in.substr(1, in.size() - 2);
-		}
-		std::vector<string> parts = splitRespectBrackets(in, ',');
-		const int options = parts.size();
-		Ability* a = new Ability[options];
-		for (int i = 0; i < options; i++) {
-			int read = a[i].readProperties(parts[i]);
-			if (parts[i].size() > read + 2) {
-				a[i].next = parseString(parts[i].substr(read + 1));
+	int countOptions() {
+		int count = 0;
+		for (Ability* checking = this;; checking++) {
+			count++;
+			if (checking->hasProperty(LAST_OPTION)) {
+				return count;
 			}
 		}
-		a[options - 1].properties |= LAST_OPTION;
-		a->fillPreviousness(NULL);
-		return a;
 	}
 
-	static Ability* combine(const std::vector<Ability*>& in) {
-		int totalSize = in.size();
-		for (Ability* a : in) {
-			while (!a->hasProperty(LAST_OPTION)) {
-				totalSize++;
-				a++;
+	// invalidates this pointer
+	int moveInMemory(Ability* newAdress) {
+		Ability* addr = newAdress;
+		int moved = 0;
+		for (Ability* moving = this;; moving++) {
+			*addr = *moving;
+			if (addr->next != NULL) {
+				addr->next->prev = addr;
 			}
+			addr++;
+			moved++;
+			if (moving->hasProperty(LAST_OPTION)) {
+				//newAdress->fillPreviousness(NULL);
+				delete[] this;
+				return moved;
+			}
+		}
+	}
+
+	// invalidates pi=ointers in input vector
+	static Ability* combine(const std::vector<Ability*>& in) {
+		int totalSize = 0;
+		for (Ability* a : in) {
+			totalSize += a->countOptions();
 		}
 		Ability* result = new Ability[totalSize];
-		int i = 0;
+		int offset = 0;
 		for (Ability* a : in) {
-			while (!a->hasProperty(LAST_OPTION)) {
-				result[i] = (*a);
-				i++;
-				a++;
-			}
-			result[i] = (*a);
-			result[i].properties ^= LAST_OPTION;
-			i++;
+			offset += a->moveInMemory(result + offset);
+			result[offset - 1].properties &= ~LAST_OPTION;
 		}
-		result[totalSize - 1].properties ^= LAST_OPTION;
+		result[totalSize - 1].properties |= LAST_OPTION;
 		result->fillPreviousness(NULL);
 		return result;
 	}
 
+	// frees all memory in the subtree
 	void del() {
 		for (Ability* ptr = this;; ptr++) {
 			if (ptr->next != NULL) {
@@ -188,15 +195,10 @@ public:
 	}
 
 	static Ability* copy(Ability* og) {
-		int options = 1;
-		for (int i = 0; !og[i].hasProperty(LAST_OPTION); i++) {
-			options++;
-		}
+		int options = og->countOptions();
 		Ability* a = new Ability[options];
 		for (int i = 0; i < options; i++) {
-			a[i].totalMovement = og[i].totalMovement;
-			a[i].properties = og[i].properties;
-			a[i].promotionType = og[i].promotionType;
+			a[i] = og[i];
 			if (og[i].next != NULL) {
 				a[i].next = copy(og[i].next);
 			}
@@ -204,6 +206,8 @@ public:
 		a->fillPreviousness(NULL);
 		return a;
 	}
+
+	static Ability* parseString(std::string in);
 
 	void invertY() {
 		totalMovement.y = -totalMovement.y;
@@ -412,6 +416,7 @@ public:
 	int move = 0;
 	bool blackToPlay = false;
 	static constexpr float MATE = 10000;
+	int piecesOnBoard = 0;
 	static inline bool isMate(int eval) {
 		return eval > 1000 || eval < -1000;
 	}
@@ -425,6 +430,8 @@ public:
 	struct Transposition {
 		int depth;
 		int move;
+		int pieces;
+		int timesUsed;
 		evaluation eval;
 		//string fen;
 	};
@@ -484,6 +491,7 @@ public:
 		moving->hasMoved = true;
 
 		if (target!= NULL) {
+			piecesOnBoard--;
 			hash ^= target->hash();
 			if (target->isBlack) {
 				materialBlack -= target->materialValue;
@@ -525,6 +533,7 @@ public:
 		squares[tai] = move.captured;
 		positionalEval = move.positionalEvalBefore;
 		if (move.captured != NULL) {
+			piecesOnBoard++;
 			Piece* p = move.captured;
 			hash ^= p->hash();
 			if (p->isBlack) {
@@ -554,6 +563,7 @@ public:
 			piecesWhite.push_back(p);
 			materialWhite += p->materialValue;
 		}
+		piecesOnBoard++;
 		hash ^= p->hash();
 	}
 
@@ -627,8 +637,7 @@ public:
 			for (int j = 0; j < 8; j++) {
 				int pieceIndex = Position{ j,i }.toArrayIndex();
 				//std::cout << "|";
-				auto lastMove = moveHistory.top();
-				if (lastMove.from == Position{j, i} || lastMove.to == Position{j, i}) {
+				if (!moveHistory.empty() && (moveHistory.top().from == Position{j, i} || moveHistory.top().to == Position{j, i})) {
 					std::cout << hue::on_light_yellow;
 				}else if ((i + j) % 2 == 0) {
 					std::cout << hue::on_grey;
@@ -778,6 +787,7 @@ public:
 		//	std::cout << "hash collision\n";
 		//}
 		if (done!=NULL && done->depth >= depth) {
+			done->timesUsed++;
 			return done->eval;
 		}
 
@@ -879,7 +889,7 @@ public:
 			blackToPlay = !blackToPlay;
 		}
 		//storeTransposition( { depth, move, best, fen() });
-		storeTransposition({ depth, move, best });
+		storeTransposition({ depth, move, piecesOnBoard, 0, best });
 		return best;
 	}
 
@@ -909,6 +919,30 @@ public:
 		return currentEval;
 	}
 };
+
+Ability* Ability::parseString(string input) {
+	if (!verifyBracketing(input)) {
+		std::cout << "input \"" << input << "\" is not correctly bracketed";
+		return NULL;
+	}
+	string in = delChars(input, ' ');
+	if (in[0] == '(') {
+		in = in.substr(1, in.size() - 2);
+	}
+	std::vector<string> parts = splitRespectBrackets(in, ',');
+	const int options = parts.size();
+	Ability* a = new Ability[options];
+	for (int i = 0; i < options; i++) {
+		int read = a[i].readProperties(parts[i]);
+		if (parts[i].size() > read + 2) {
+			a[i].next = parseString(parts[i].substr(read + 1));
+		}
+	}
+	a[options - 1].properties |= LAST_OPTION;
+	a->fillPreviousness(NULL);
+	return a;
+}
+
 
 Ability* makePieceType(std::string in) {
 	// this does not really need to be efficient
@@ -971,14 +1005,12 @@ Ability* makePieceType(std::string in) {
 			parts.push_back(b);
 		}
 		Ability* result = Ability::combine(parts);
-		for (Ability* part : parts) {
-			delete[] part;
-		}
 		return result;
 	}
 	Ability* a = Ability::parseString(in);
 	return a;
 }
+
 
 int main()
 {
@@ -1010,14 +1042,24 @@ int main()
 
 
 	Board b;
-	//b.loadFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR - - - - -"); // default
+	b.loadFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR - - - - -"); // default
 	//b.loadFen("rnbqkbnr/8/8/8/8/8/8/RNBQKBNR - - - - -");
 	//b.loadFen("R1K5/8/8/8/8/5k2/8/8 - - - - -"); // rook mate
-	b.loadFen("NBK5/8/8/8/8/5k2/8/8 - - - - -"); // bishop knight mate
+	//b.loadFen("NBK5/8/8/8/8/5k2/8/8 - - - - -"); // bishop knight mate
 	std::cout << b.fen()<<"\n";
+
+	printDocs("test2");
 
 	constexpr int depth = 100;
 	while (1 == 1) {
+		b.print();
+		string s;
+		std::getline(std::cin, s);
+		while (!b.parseMove(s)) {
+			std::getline(std::cin, s);
+		};
+
+
 		std::cout << "zero-depth eval: " << b.alphaBeta(0, -INFINITY, INFINITY).value << "\n";
 
 
@@ -1028,11 +1070,5 @@ int main()
 
 
 		b.makeMove(eval.bestMoveFrom->position, eval.bestMove);
-		b.print();
-		string s; 
-		std::getline(std::cin, s);
-		while (!b.parseMove(s)) {
-			std::getline(std::cin, s);
-		};
 	}
 }

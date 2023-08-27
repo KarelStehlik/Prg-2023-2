@@ -92,3 +92,17 @@ bool sharesChars(string a, string b) {
 	}
 	return false;
 }
+
+bool verifyBracketing(std::string in) {
+	int open = 0;
+	for (char c : in) {
+		if (c == '(') {
+			open++;
+		}
+		else if (c == ')') {
+			open--;
+			if (open < 0)return false;
+		}
+	}
+	return open == 0;
+}
