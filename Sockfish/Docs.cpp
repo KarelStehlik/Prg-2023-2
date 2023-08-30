@@ -15,6 +15,7 @@ void printDocs(std::string category) {
                 std::getline(myfile, line);
                 std::cout << line << '\n';
             }
+            return;
         }
         else {
             bool printing = false;
@@ -41,5 +42,5 @@ void printDocs(std::string category) {
         return;
     }
 
-    std::cout << "Docs for " << category << " not found.\n";
+    std::cout << "Docs for '" << category << "' not found.\n";
 }

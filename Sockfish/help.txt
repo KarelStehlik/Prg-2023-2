@@ -1,18 +1,50 @@
-[test]
-test
-ggg
-nope hg
-f
+[general]
+Hello user!
+this is a simple console app where you can play chess. It includes the option to add custom pieces and play against an AI.
+available commands: piece, fen, reset, takeback, toggleBlackBot, toggleWhiteBot, help.
+type help <command> to see info about that command.
+default behaviour (with no command) is to make a move.
 
-h
+[move]
+you make a move by typing the starting square and the target square, for examlpe e2e4 as the first move.
 
-[test2]
-test2stuff
-and
-some
-more
+[piece]
+create a custom piece
+expects a piece identifier, at most one optional argument and a move description.
 
-[test3]
-t3s
-a
-m
+optional arguments are: 
+- mirror <xy>: the piece movement is mirrored along the Y and/or X axis
+example: piece b mirror xy 11>22>33>44>55>66>77
+- symmetric: the piece can also move rotated by 90, 180 or 270 degrees
+example: piece n symmetric 12,21
+- combine: doesn't expect a usual move desription, but rather a list of pieces that the new piece combines
+example: piece q combine r,b
+
+move description:
+it is a chain of positions, "," and ">". A move description of "11" means the piece can move up and right diagonally by 1 square.
+"11, -1-1, 1-1, -11" means it can move diagonally by 1 in any direction, and "11>22" means it can move diagonally by (1,1) and if
+that square is clear, can continue to (2,2).
+bracketing is possible, for example "piece x symmetric 11>(21,12)" is a possible implementation of a knight that doesn't jump.
+however, making a bracket the condition for another move is not supported, such as "(10,01)>11".
+
+
+[fen]
+without arguments, prints the fen of the current position.
+with an argument, it attempts to load a given FEN.
+keep in mind that castling and en passant is not supported, so those fields will be blank in the generated FEN and ignored in the loaded one.
+
+[reset]
+loads the default board position.
+
+[takeback]
+unmakes the last full move.
+
+[toggleBlackBot]
+toggles whether black is played by a bot, default true.
+
+[toggleWhiteBot]
+toggles whether white is played by a bot, default false.
+
+[help]
+without arguments, displays the entire help file.
+with an argument, attempts to find the help category for a givevn command.
