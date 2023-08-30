@@ -908,6 +908,17 @@ public:
 		return &found->second;
 	}
 
+	// if value means "chackmate in x", returns "checkmate in x+nTurnsLater"
+	float delayMate(float value, int nTurnsLater) {
+		if (!isMate(value)) {
+			return value;
+		}
+		if (value < 0) {
+			return value + nTurnsLater;
+		}
+		return value - nTurnsLater;
+	}
+
 	int stored = 0, loaded = 0;
 
 	evaluation alphaBeta(int depth, float alpha, float beta) {
@@ -937,7 +948,6 @@ public:
 
 				alpha = max(alpha, done->lowerBound);
 				beta = min(beta, done->upperBound);
-				return done->eval;
 			}
 		}
 
@@ -989,15 +999,8 @@ public:
 
 				if (play != unplayable && current->hasProperty(current->DIRECTLY_PLAYABLE)) {
 					makeMove(piece->position, current);
-					float value = alphaBeta(depth - 1, alpha, beta).value;
-					if (isMate(value)) {
-						if (value < 0) {
-							value++;
-						}
-						else {
-							value--;
-						}
-					}
+					float value = alphaBeta(depth - 1, delayMate(alpha,-1), delayMate(beta,-1)).value;
+					value = delayMate(value, 1);
 					unmakeMove();
 
 
