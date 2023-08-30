@@ -423,10 +423,10 @@ public:
 	bool whiteIsAi = false;
 	bool blackIsAi = true;
 	bool isDraw = false;
-	int maxTableSize = 100000;
+	int maxTableSize = 500000;
 
 	static inline bool isMate(int eval) {
-		return eval > 1000 || eval < -1000;
+		return (eval > 1000 || eval < -1000) && eval!=INFINITY && eval!=-INFINITY;
 	}
 
 	struct evaluation {
@@ -872,9 +872,6 @@ public:
 		}
 	}
 
-	void storeTransposition(Transposition trans) {
-		transpositionTable[hash] = trans;
-	}
 
 	bool isCheck(bool testingWhiteInCheck) {
 		std::vector<Piece*>& pieces = testingWhiteInCheck ? piecesBlack:piecesWhite;
@@ -900,33 +897,43 @@ public:
 	
 	int maxMoveReached = 0;
 
+	float delayMate(float value, int moveInserted) {
+		if (!isMate(value)) {
+			return value;
+		}
+		if (value < 0) {
+			return value + move-moveInserted;
+		}
+		return value -move+moveInserted;
+	}
+
+	void storeTransposition(Transposition trans) {
+		transpositionTable[hash] = trans;
+	}
+
 	Transposition* getTransposition() {
 		auto found = transpositionTable.find(hash);
 		if (found == transpositionTable.end()) {
 			return NULL;
 		}
-		return &found->second;
-	}
+		Transposition* t = &found->second;
 
-	// if value means "chackmate in x", returns "checkmate in x+nTurnsLater"
-	float delayMate(float value, int nTurnsLater) {
-		if (!isMate(value)) {
-			return value;
-		}
-		if (value < 0) {
-			return value + nTurnsLater;
-		}
-		return value - nTurnsLater;
+		t->eval.value = delayMate(t->eval.value, t->move);
+		t->lowerBound = delayMate(t->lowerBound, t->move);
+		t->upperBound = delayMate(t->upperBound, t->move);
+		t->move = move;
+
+		return t;
 	}
 
 	int stored = 0, loaded = 0;
 
 	evaluation alphaBeta(int depth, float alpha, float beta) {
 		if (blackWon || whiteWon) {
-			return { (blackWon ? -MATE : MATE) , NULL, NULL };
+			return { (blackWon ? -MATE+move : MATE-move) , NULL, NULL };
 		}
 
-		evaluation best = { blackToPlay ? 1000000 : -1000000 , NULL,NULL };
+		evaluation best = { blackToPlay ? INFINITY : -INFINITY , NULL,NULL };
 
 		Transposition* done = getTransposition();
 		if (done != NULL) {
@@ -999,20 +1006,18 @@ public:
 
 				if (play != unplayable && current->hasProperty(current->DIRECTLY_PLAYABLE)) {
 					makeMove(piece->position, current);
-					float value = alphaBeta(depth - 1, delayMate(alpha,-1), delayMate(beta,-1)).value;
-					value = delayMate(value, 1);
+					float value = alphaBeta(depth - 1, alpha, beta).value;
 					unmakeMove();
 
-
 					if (!blackToPlay) {
-						couldBeStalemate &= value == -MATE +2;
+						couldBeStalemate &= value == -MATE +move+2;
 						if (value > best.value) {
 							best = { value, piece, current };
 						}
 						alpha = max(alpha, value);
 					}
 					else {
-						couldBeStalemate &= value == MATE -2;
+						couldBeStalemate &= value == MATE -move-2;
 						if (value < best.value) {
 							best = { value, piece, current };
 						}
@@ -1310,12 +1315,12 @@ int main()
 	//b.loadFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 0"); // default
 	//tests:
 	//b.loadFen("rnbqkbnr/8/8/8/8/8/8/RNBQKBNR - - - - -");
-	//b.loadFen("R1K5/8/8/8/8/5k2/8/8 w - - 0 0"); // rook mate
-	b.loadFen("8/7k/8/6R1/4K3/8/8/8 w - - 0 0"); // y u no see draw
+	b.loadFen("R1K5/8/8/8/8/5k2/8/8 w - - 0 0"); // rook mate
+	//b.loadFen("1K6/8/8/7k/8/8/8/6R1 b - - 0 0"); // y u repeat
 	//b.loadFen("NBK5/8/8/8/8/5k2/8/8 - - - - -"); // bishop knight mate
 	std::cout << b.fen()<<"\n";
 
-	constexpr int depth = 11;
+	constexpr int depth = 100;
 	while (true) {
 		b.print();
 		if (b.blackWon) {
