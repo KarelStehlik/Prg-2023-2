@@ -592,10 +592,23 @@ public:
 				isDraw = true;
 			}
 		}
-		repetitionTable[hash] = 1;
+		else {
+			repetitionTable[hash] = 1;
+		}
 	}
 
 	void unmakeMove() {
+		auto found = repetitionTable.find(hash);
+		if (found != repetitionTable.end()) {
+			found->second--;
+			if (found->second == 2) {
+				isDraw = false;
+			}
+		}
+		else {
+			//std::cout << "Debug warning: hash didn't reverse properly";
+		}
+
 		move--;
 		blackToPlay = !blackToPlay;
 		hash ^= getPlayerHash();
@@ -630,14 +643,6 @@ public:
 			p->alive = true;
 		}
 		hash ^= moving->hash();
-
-		auto found = repetitionTable.find(hash);
-		if (found != repetitionTable.end()) {
-			found->second--;
-			if (found->second == 2) {
-				isDraw = false;
-			}
-		}
 	}
 
 	void addPiece(Position pos, char id, bool isBlack) {
