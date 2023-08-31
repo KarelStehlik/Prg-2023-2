@@ -1,0 +1,2 @@
+Použitá knihovna je (kromě std) jen jedna:
+https://github.com/aafulei/color-console

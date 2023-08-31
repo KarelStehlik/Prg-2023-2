@@ -106,7 +106,7 @@ private:
 			}
 			else if (c == '=') {
 				if (read == input.size()) {
-					std::cout << "Error: move description ending with '=' (" << input << ")\n";
+					std::cout << "Error: move description ending with '=' :" << input << "\n";
 					return -1;
 				}
 				read++;
@@ -325,13 +325,18 @@ public:
 	Ability* invertedAbility;
 	bool isKing;
 	float estimatedValue;
-	PieceType(char id, Ability* ability, bool isKing, float value) {
+
+	void init(char id, Ability* ability, bool isKing, float value) {
 		this->id = id;
 		this->ability = ability;
 		this->invertedAbility = Ability::copy(ability);
 		invertedAbility->invertY();
 		this->isKing = isKing;
 		estimatedValue = value;
+	}
+
+	PieceType(char id, Ability* ability, bool isKing, float value) {
+		init(id, ability, isKing, value);
 	}
 };
 
@@ -396,7 +401,7 @@ public:
 	}
 };
 
-class Board {
+class Game {
 public:
 	struct MoveRecord {
 		Position from, to;
@@ -479,7 +484,7 @@ public:
 		return result;
 	}
 
-	Board() {
+	Game() {
 		for (int i = 0; i < 64; i++) {
 			squares[i] = NULL;
 		}
@@ -928,6 +933,67 @@ public:
 
 	int stored = 0, loaded = 0;
 
+	// fen Q7/2k5/2p2p1R/8/7B/6PP/5PK1/8 w - - 10 39
+
+	evaluation simpleEval() {
+		float material = 0;//materialWhite - materialBlack;
+
+		float movesWhite = 0;
+		for (Piece* piece : piecesWhite) {
+			if (piece->alive) {
+				Ability::MoveIterator iter = Ability::MoveIterator(piece->ability);
+				Ability* current;
+				int thisPieceMoves = 0;
+				while ((current = iter.get()) != NULL) {
+					playability play = isPlayable(current, piece->position);
+					iter.next(play);
+					if (play != unplayable) {
+						thisPieceMoves++;
+					}
+				}
+				movesWhite += sqrt(thisPieceMoves);
+			}
+		}
+		float movesBlack = 0;
+		for (Piece* piece : piecesBlack) {
+			if (piece->alive) {
+				Ability::MoveIterator iter = Ability::MoveIterator(piece->ability);
+				Ability* current;
+				int thisPieceMoves = 0;
+				while ((current = iter.get()) != NULL) {
+					playability play = isPlayable(current, piece->position);
+					iter.next(play);
+					if (play != unplayable) {
+						thisPieceMoves++;
+					}
+				}
+				movesBlack += sqrt(thisPieceMoves);
+			}
+		}
+		return { material + (movesWhite - movesBlack), NULL, NULL };
+	}
+
+	void evaluateMove(Piece* piece, Ability* current, int depth, float& alpha, float& beta, evaluation& best, bool& couldBeStalemate) {
+		makeMove(piece->position, current);
+		float value = alphaBeta(depth - 1, alpha, beta).value;
+		unmakeMove();
+
+		if (!blackToPlay) {
+			couldBeStalemate &= value == -MATE +move+2;
+			if (value > best.value) {
+				best = { value, piece, current };
+			}
+			alpha = max(alpha, value);
+		}
+		else {
+			couldBeStalemate &= value == MATE -move-2;
+			if (value < best.value) {
+				best = { value, piece, current };
+			}
+			beta = min(beta, value);
+		}
+	}
+
 	evaluation alphaBeta(int depth, float alpha, float beta) {
 		if (blackWon || whiteWon) {
 			return { (blackWon ? -MATE+move : MATE-move) , NULL, NULL };
@@ -936,63 +1002,37 @@ public:
 		evaluation best = { blackToPlay ? INFINITY : -INFINITY , NULL,NULL };
 
 		Transposition* done = getTransposition();
-		if (done != NULL) {
 
+		if (done != NULL) {
 			if (done->depth >= depth) {
 				done->timesUsed++;
 				loaded++;
 
-				if (done->upperBound <= alpha) {
-					best = done->eval;
-					best.value = done->upperBound;
-					return best;
-				}
-				if (done->lowerBound >= beta) {
-					best = done->eval;
-					best.value = done->lowerBound;
-					return best;
-				}
-
 				alpha = max(alpha, done->lowerBound);
 				beta = min(beta, done->upperBound);
+
+				if (alpha >= beta) {
+					return done->eval;
+				}
 			}
 		}
 
 		if (depth == 0) {
-			float material = materialWhite - materialBlack;
-
-			float movesWhite = 0;
-			for (Piece* piece : piecesWhite) {
-				if (piece->alive) {
-					Ability::MoveIterator iter = Ability::MoveIterator(piece->ability);
-					Ability* current;
-					while ((current = iter.get()) != NULL) {
-						playability play = isPlayable(current, piece->position);
-						iter.next(play);
-						movesWhite++;
-					}
-				}
-			}
-			float movesBlack = 0;
-			for (Piece* piece : piecesBlack) {
-				if (piece->alive) {
-					Ability::MoveIterator iter = Ability::MoveIterator(piece->ability);
-					Ability* current;
-					while ((current = iter.get()) != NULL) {
-						playability play = isPlayable(current, piece->position);
-						iter.next(play);
-						movesBlack++;
-					}
-				}
-			}
-			return { material + (movesWhite - movesBlack) / 10, NULL, NULL };
+			return simpleEval();
 		}
 
-		std::vector<Piece*>& pieces = blackToPlay ? piecesBlack : piecesWhite;
+		float ogAlpha = alpha, ogBeta = beta;
 
 		bool couldBeStalemate = true;
 
-		float ogAlpha = alpha, ogBeta = beta;
+		if (done!=NULL && done->eval.bestMove != NULL && done->depth<depth) {
+			Ability* move = done->eval.bestMove;
+			Piece* piece = done->eval.bestMoveFrom;
+			if (piece->alive && piece->isBlack == blackToPlay && isPlayableIncludingPrevious(move, piece->position)) {
+				evaluateMove(piece, move, depth, alpha, beta, best, couldBeStalemate);
+			}
+		}
+		std::vector<Piece*>& pieces = blackToPlay ? piecesBlack : piecesWhite;
 
 		for (Piece* piece : pieces) {
 			if (!piece->alive) {
@@ -1000,29 +1040,15 @@ public:
 			}
 			Ability::MoveIterator iter = Ability::MoveIterator(piece->ability);
 			Ability* current;
-			while ((current = iter.get()) != NULL && ((blackToPlay && best.value > ogAlpha) || (!blackToPlay && best.value < ogBeta))) {
+			while ((current = iter.get()) != NULL) {
 				playability play = isPlayable(current, piece->position);
 				iter.next(play);
-
+				if (alpha >= beta) {
+					couldBeStalemate = false;
+					break;
+				}
 				if (play != unplayable && current->hasProperty(current->DIRECTLY_PLAYABLE)) {
-					makeMove(piece->position, current);
-					float value = alphaBeta(depth - 1, alpha, beta).value;
-					unmakeMove();
-
-					if (!blackToPlay) {
-						couldBeStalemate &= value == -MATE +move+2;
-						if (value > best.value) {
-							best = { value, piece, current };
-						}
-						alpha = max(alpha, value);
-					}
-					else {
-						couldBeStalemate &= value == MATE -move-2;
-						if (value < best.value) {
-							best = { value, piece, current };
-						}
-						beta = min(beta, value);
-					}
+					evaluateMove(piece, current, depth, alpha, beta, best, couldBeStalemate);
 				}
 			}
 
@@ -1036,19 +1062,22 @@ public:
 			}
 		}
 
-		Transposition t = { depth, move, piecesOnBoard, 0, best, -INFINITY, INFINITY };
+		if (done == NULL || done->depth<depth) {
+			storeTransposition({ depth, move, piecesOnBoard, 0, best, -INFINITY, INFINITY });
+			done = getTransposition();
+		}
 		if (best.value <= ogAlpha) {
-			t.upperBound=best.value;
+			done->upperBound = best.value;
 		}
 		if(best.value > ogAlpha && best.value < ogBeta) {
-			t.lowerBound = best.value;
-			t.upperBound = best.value;
+			done->lowerBound = best.value;
+			done->upperBound = best.value;
 		}
 		if(best.value >= ogBeta) {
-			t.lowerBound = best.value;
+			done->lowerBound = best.value;
 		}
+		done->depth = depth;
 
-		storeTransposition(t);
 		stored++;
 		return best;
 	}
@@ -1064,7 +1093,7 @@ public:
 		auto start = std::chrono::system_clock::now();
 		evaluation currentEval;
 		int i = 0;
-		for (; i <= maxDepth && elapsedUs<100000; i++) {
+		for (; i <= maxDepth && elapsedUs<300000; i++) {
 			resetSearchData();
 			currentEval=alphaBeta(i, -INFINITY, INFINITY);
 			elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now() - start).count();
@@ -1208,7 +1237,7 @@ Ability* makePieceType(std::string in) {
 	return a;
 }
 
-void userInput(std::string in, Board& b) {
+void userInput(std::string in, Game& b) {
 	std::vector<std::string> words = splitOffFirstWord(in, ' ');
 	std::string action = words[0];
 
@@ -1257,7 +1286,8 @@ void userInput(std::string in, Board& b) {
 		if (ability == NULL) {
 			return;
 		}
-		if (getPieceType(id) != NULL) {
+		PieceType* t = getPieceType(id);
+		if (t != NULL) {
 			std::cout << "'" << id << "' is an existing piece type. Type 'yes' to overwrite it, anything else to cancel.\n";
 			std::string prompt;
 			std::getline(std::cin, prompt);
@@ -1266,12 +1296,7 @@ void userInput(std::string in, Board& b) {
 				ability->del();
 				return;
 			}
-			auto find = std::find_if(std::begin(pieceTypes), std::end(pieceTypes),
-				[id](PieceType* const& a) {return a->id == id; });
-
-			if (find != std::end(pieceTypes)) {
-				pieceTypes.erase(find);
-			}
+			t->init(id, ability, false, 3);
 		}
 		pieceTypes.push_back(new PieceType(id, ability, false, 3));
 		return;
@@ -1311,7 +1336,7 @@ int main()
 	std::cout << "\n\n";
 
 
-	Board b;
+	Game b;
 	//b.loadFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 0"); // default
 	//tests:
 	//b.loadFen("rnbqkbnr/8/8/8/8/8/8/RNBQKBNR - - - - -");
@@ -1341,7 +1366,7 @@ int main()
 		}
 		if ((b.blackToPlay && b.blackIsAi) || (!b.blackToPlay && b.whiteIsAi)) {
 			std::cout << "bot is thinking...\n";
-			Board::evaluation eval = b.RunAi(depth);
+			Game::evaluation eval = b.RunAi(depth);
 			std::cout << "eval: " << eval.value << " " << '\n';
 			b.makeMove(eval.bestMoveFrom->position, eval.bestMove);
 		}
