@@ -862,7 +862,7 @@ public:
 	}
 
 	void cleanTranspositionTable() {
-		int threshold = 1;
+		int threshold = 5;
 		while (transpositionTable.size() > maxTableSize) {
 			auto itr = transpositionTable.begin();
 			while (itr != transpositionTable.end()) {
@@ -1003,7 +1003,9 @@ public:
 
 		Transposition* done = getTransposition();
 
-		if (done != NULL) {
+		bool loadedTransposition = done != NULL;
+
+		if (loadedTransposition) {
 			if (done->depth >= depth) {
 				done->timesUsed++;
 				loaded++;
@@ -1041,12 +1043,13 @@ public:
 			Ability::MoveIterator iter = Ability::MoveIterator(piece->ability);
 			Ability* current;
 			while ((current = iter.get()) != NULL) {
-				playability play = isPlayable(current, piece->position);
-				iter.next(play);
 				if (alpha >= beta) {
 					couldBeStalemate = false;
 					break;
 				}
+
+				playability play = isPlayable(current, piece->position);
+				iter.next(play);
 				if (play != unplayable && current->hasProperty(current->DIRECTLY_PLAYABLE)) {
 					evaluateMove(piece, current, depth, alpha, beta, best, couldBeStalemate);
 				}
@@ -1055,16 +1058,17 @@ public:
 		}
 		if (couldBeStalemate) {
 			if (!isCheck(!blackToPlay)) {
-				best = { 0.f, NULL, NULL };
-				storeTransposition({ 1000, move, piecesOnBoard, 0, best, best.value, best.value });
-				stored++;
-				return best;
+				return { 0.f, NULL, NULL };
 			}
 		}
 
-		if (done == NULL || done->depth<depth) {
+		if (!loadedTransposition) {
 			storeTransposition({ depth, move, piecesOnBoard, 0, best, -INFINITY, INFINITY });
-			done = getTransposition();
+		}
+		done = getTransposition();
+		if (done->depth < depth) {
+			done->lowerBound = -INFINITY;
+			done->upperBound = INFINITY;
 		}
 		if (best.value <= ogAlpha) {
 			done->upperBound = best.value;
@@ -1077,6 +1081,8 @@ public:
 			done->lowerBound = best.value;
 		}
 		done->depth = depth;
+		done->move = move;
+		done->eval = best;
 
 		stored++;
 		return best;
@@ -1342,7 +1348,7 @@ int main()
 	//b.loadFen("rnbqkbnr/8/8/8/8/8/8/RNBQKBNR - - - - -");
 	b.loadFen("R1K5/8/8/8/8/5k2/8/8 w - - 0 0"); // rook mate
 	//b.loadFen("1K6/8/8/7k/8/8/8/6R1 b - - 0 0"); // y u repeat
-	//b.loadFen("NBK5/8/8/8/8/5k2/8/8 - - - - -"); // bishop knight mate
+	//b.loadFen("NBK5/8/8/8/8/5k2/8/8 w - - 0 0"); // bishop knight mate
 	std::cout << b.fen()<<"\n";
 
 	constexpr int depth = 100;
