@@ -8,6 +8,7 @@
 #include<vector>
 #include<unordered_map>
 #include<chrono>
+#include<random>
 #include "StringStuff.h"
 #include "ColorOut.h"
 #include "libs/color-console-master/include/color.hpp"
@@ -70,8 +71,9 @@ public:
 
 
 private:
-	int16_t properties;
-	int readProperties(string input) {
+	int16_t flags;
+
+	int readFlags(string input) {
 		int posLen = 2;
 		if (input[0] == '-') {
 			totalMovement.x = -(input[1] - '0');
@@ -96,13 +98,13 @@ private:
 		for (; read < input.size(); read++) {
 			char c = input[read];
 			if (c == 'c') {
-				properties |= CONDITION_CAPTURE_ONLY;
+				flags |= CONDITION_CAPTURE_ONLY;
 			}
 			else if (c == 'n') {
-				properties |= CONDITION_NO_CAPTURE;
+				flags |= CONDITION_NO_CAPTURE;
 			}
 			else if (c == 'f') {
-				properties |= ONLY_FIRST_MOVE;
+				flags |= ONLY_FIRST_MOVE;
 			}
 			else if (c == '=') {
 				if (read == input.size()) {
@@ -121,7 +123,7 @@ private:
 public:
 	Ability() {
 		totalMovement = { 0,0 };
-		properties = DIRECTLY_PLAYABLE;
+		flags = DIRECTLY_PLAYABLE;
 		next = NULL;
 		prev = NULL;
 		promotionType = NULL;
@@ -132,7 +134,7 @@ public:
 		if (next != NULL) {
 			next->fillPreviousness(this);
 		}
-		if (!hasProperty(LAST_OPTION)) {
+		if (!hasFlag(LAST_OPTION)) {
 			(this + 1)->fillPreviousness(prev);
 		}
 	}
@@ -141,7 +143,7 @@ public:
 		int count = 0;
 		for (Ability* checking = this;; checking++) {
 			count++;
-			if (checking->hasProperty(LAST_OPTION)) {
+			if (checking->hasFlag(LAST_OPTION)) {
 				return count;
 			}
 		}
@@ -158,7 +160,7 @@ public:
 			}
 			addr++;
 			moved++;
-			if (moving->hasProperty(LAST_OPTION)) {
+			if (moving->hasFlag(LAST_OPTION)) {
 				//newAdress->fillPreviousness(NULL);
 				delete[] this;
 				return moved;
@@ -176,9 +178,9 @@ public:
 		int offset = 0;
 		for (Ability* a : in) {
 			offset += a->moveInMemory(result + offset);
-			result[offset - 1].properties &= ~LAST_OPTION;
+			result[offset - 1].flags &= ~LAST_OPTION;
 		}
-		result[totalSize - 1].properties |= LAST_OPTION;
+		result[totalSize - 1].flags |= LAST_OPTION;
 		result->fillPreviousness(NULL);
 		return result;
 	}
@@ -189,7 +191,7 @@ public:
 			if (ptr->next != NULL) {
 				ptr->next->del();
 			}
-			if (ptr->hasProperty(LAST_OPTION)) {
+			if (ptr->hasFlag(LAST_OPTION)) {
 				break;
 			}
 		}
@@ -216,7 +218,7 @@ public:
 		if (next != NULL) {
 			next->invertY();
 		}
-		if (!hasProperty(LAST_OPTION)) {
+		if (!hasFlag(LAST_OPTION)) {
 			(this + 1)->invertY();
 		}
 	}
@@ -226,7 +228,7 @@ public:
 		if (next != NULL) {
 			next->invertX();
 		}
-		if (!hasProperty(LAST_OPTION)) {
+		if (!hasFlag(LAST_OPTION)) {
 			(this + 1)->invertX();
 		}
 	}
@@ -238,13 +240,13 @@ public:
 		if (next != NULL) {
 			next->rotate();
 		}
-		if (!hasProperty(LAST_OPTION)) {
+		if (!hasFlag(LAST_OPTION)) {
 			(this + 1)->rotate();
 		}
 	}
 
-	inline bool hasProperty(int propertyConstant) {
-		return properties & propertyConstant;
+	inline bool hasFlag(int propertyConstant) {
+		return flags & propertyConstant;
 	}
 
 	void print() {
@@ -255,7 +257,7 @@ public:
 			next->print();
 			std::cout << ")";
 		}
-		if (!hasProperty(LAST_OPTION)) {
+		if (!hasFlag(LAST_OPTION)) {
 			std::cout << ", ";
 			(this + 1)->print();
 		}
@@ -277,7 +279,7 @@ public:
 				current = current->next;
 				return current;
 			}
-			while (current!=NULL && current->hasProperty(LAST_OPTION)) {
+			while (current!=NULL && current->hasFlag(LAST_OPTION)) {
 				current = current->prev;
 			}
 			if (current == NULL) {
@@ -289,7 +291,7 @@ public:
 	};
 
 	bool eq(const Ability* other) {
-		if (!(totalMovement == other->totalMovement) || properties != other->properties) {
+		if (!(totalMovement == other->totalMovement) || flags != other->flags) {
 			return false;
 		}
 		if (next != NULL) {
@@ -300,7 +302,7 @@ public:
 				return false;
 			}
 		}
-		if (hasProperty(LAST_OPTION)) {
+		if (hasFlag(LAST_OPTION)) {
 			return true;
 		}
 		return (this + 1)->eq(other + 1);
@@ -316,6 +318,58 @@ public:
 		}
 		std::cout << "\n";
 	}
+
+	float estimateValue() {
+		constexpr int trials = 10000;
+		constexpr int density = 30;
+		float value = 0;
+		for(int test = 0; test < trials;test++){
+			std::mt19937 rng(std::chrono::system_clock::now().time_since_epoch().count());
+			int fakeBoard[8][8];
+			int reachability[8][8];
+			Position centre = { rng()%8, rng()%8 };
+			for (int i = 0; i < 8; i++) {
+				for (int j = 0; j < 8; j++) {
+					int x = rng() % 100;
+					if (x < density) {
+						fakeBoard[i][j] = x % 2 + 1;
+					}
+					else {
+						fakeBoard[i][j] = 0;
+					}
+					reachability[i][j] = 0;
+				}
+			}
+			fakeBoard[centre.x][centre.y] = 2;
+			MoveIterator iter = MoveIterator(this);
+			auto move = iter.get();
+			while ((move = iter.get()) != NULL) {
+				Position target = move -> totalMovement + centre;
+				int targetOccupant = fakeBoard[target.x][target.y];
+				playability play;
+				if (targetOccupant == 0 && !move->hasFlag(CONDITION_CAPTURE_ONLY)) {
+					play = playable;
+				}
+				else if (targetOccupant == 1 && !move->hasFlag(CONDITION_NO_CAPTURE)) {
+					play = capture;
+				}
+				else {
+					play = unplayable;
+				}
+				iter.next(play);
+				if (play != unplayable) {
+					reachability[target.x][target.y] = 1;
+				}
+			}
+			for (int i = 0; i < 8; i++) {
+				for (int j = 0; j < 8; j++) {
+					value += reachability[i][j];
+				}
+			}
+		}
+		value /= trials;
+		return value/2.2;
+	}
 };
 
 class PieceType {
@@ -324,19 +378,19 @@ public:
 	Ability* ability;
 	Ability* invertedAbility;
 	bool isKing;
-	float estimatedValue;
+	int estimatedValue;
 
-	void init(char id, Ability* ability, bool isKing, float value) {
+	void init(char id, Ability* ability, bool isKing) {
 		this->id = id;
 		this->ability = ability;
 		this->invertedAbility = Ability::copy(ability);
 		invertedAbility->invertY();
 		this->isKing = isKing;
-		estimatedValue = value;
+		estimatedValue = ability->estimateValue()*1000;
 	}
 
-	PieceType(char id, Ability* ability, bool isKing, float value) {
-		init(id, ability, isKing, value);
+	PieceType(char id, Ability* ability, bool isKing) {
+		init(id, ability, isKing);
 	}
 };
 
@@ -360,7 +414,7 @@ public:
 	Position position;
 	bool hasMoved;
 	bool isKing;
-	float materialValue;
+	int materialValue;
 	bool alive = true;
 	PieceType* pieceType;
 
@@ -370,7 +424,6 @@ public:
 		typeId = ' ';
 		hasMoved = false;
 		isKing = t->isKing;
-		materialValue = 0;
 
 		isBlack = black;
 		updateType(t);
@@ -407,7 +460,6 @@ public:
 		Position from, to;
 		Piece* captured;
 		bool hasMovedBefore;
-		int positionalEvalBefore;
 		PieceType* promotedFrom;
 		int halfMoves;
 	};
@@ -418,7 +470,6 @@ public:
 	std::vector<Piece*> piecesBlack;
 	int materialWhite=0, materialBlack=0;
 	bool whiteWon = false, blackWon = false;
-	int positionalEval = 0;
 	uint64_t hash = 0;
 	int move = 0;
 	bool blackToPlay = false;
@@ -451,6 +502,8 @@ public:
 	};
 
 	std::unordered_map<uint64_t, Transposition> transpositionTable;
+
+	std::unordered_map<uint64_t, int> repetitionTable;
 
 	string fen() {
 		string result = "";
@@ -500,7 +553,7 @@ public:
 
 		hash ^= moving->hash();
 
-		moveHistory.push({ from, to, target, moving->hasMoved , materialWhite - materialBlack, moving->pieceType, halfMovesWithoutCapture });
+		moveHistory.push({ from, to, target, moving->hasMoved ,moving->pieceType, halfMovesWithoutCapture });
 		halfMovesWithoutCapture++;
 
 		if ((to.y == 7 || to.y == 0) && ability->promotionType!=NULL) {
@@ -512,6 +565,9 @@ public:
 		if (target!= NULL) {
 			halfMovesWithoutCapture = 0;
 			piecesOnBoard--;
+			if (!(target->position == to)) {
+				std::cout << "????";
+			}
 			hash ^= target->hash();
 			if (target->isBlack) {
 				materialBlack -= target->materialValue;
@@ -528,6 +584,15 @@ public:
 		squares[fai] = NULL;
 
 		hash ^= moving->hash();
+
+		auto found = repetitionTable.find(hash);
+		if (found != repetitionTable.end()) {
+			found->second++;
+			if (found->second >= 3) {
+				isDraw = true;
+			}
+		}
+		repetitionTable[hash] = 1;
 	}
 
 	void unmakeMove() {
@@ -550,7 +615,6 @@ public:
 			moving->updateType(lastMove.promotedFrom);
 		}
 		squares[tai] = lastMove.captured;
-		positionalEval = lastMove.positionalEvalBefore;
 		if (lastMove.captured != NULL) {
 			piecesOnBoard++;
 			Piece* p = lastMove.captured;
@@ -566,8 +630,15 @@ public:
 			p->alive = true;
 		}
 		hash ^= moving->hash();
-	}
 
+		auto found = repetitionTable.find(hash);
+		if (found != repetitionTable.end()) {
+			found->second--;
+			if (found->second == 2) {
+				isDraw = false;
+			}
+		}
+	}
 
 	void addPiece(Position pos, char id, bool isBlack) {
 		Piece* p = Piece::create(id, isBlack);
@@ -754,7 +825,7 @@ public:
 	// checks if the target square is obstructed by something the ability can't move to
 	playability isPlayable(Ability* a, Position startingSquare) {
 		Piece* actor = squares[startingSquare.toArrayIndex()];
-		if (actor == NULL || (actor->hasMoved && a->hasProperty(a->ONLY_FIRST_MOVE))) {
+		if (actor == NULL || (actor->hasMoved && a->hasFlag(a->ONLY_FIRST_MOVE))) {
 			return unplayable;
 		}
 		bool blackMove = actor->isBlack;
@@ -766,7 +837,7 @@ public:
 
 		Piece* target = squares[targetIndex];
 		if (target == NULL) {
-			if (a->hasProperty(a->CONDITION_CAPTURE_ONLY)) {
+			if (a->hasFlag(a->CONDITION_CAPTURE_ONLY)) {
 				return unplayable;
 			}
 			return playable;
@@ -776,7 +847,7 @@ public:
 			return unplayable;
 		}
 
-		if (a->hasProperty(a->CONDITION_NO_CAPTURE)) {
+		if (a->hasFlag(a->CONDITION_NO_CAPTURE)) {
 			return unplayable;
 		}
 		return capture;
@@ -809,14 +880,17 @@ public:
 	}
 
 	bool isPlayableIncludingPrevious(Ability* a, Position startingSquare) {
-		if (!isPlayable(a, startingSquare)) {
+		if (isPlayable(a, startingSquare)==unplayable) {
 			return false;
 		}
 		while (a->prev != NULL) {
 			a = a->prev;
-			if (!isPlayable(a, startingSquare)) {
+			if (isPlayable(a, startingSquare)!=playable) {
 				return false;
 			}
+		}
+		if (squares[startingSquare.toArrayIndex()]->ability != a) {
+			return false;
 		}
 		return true;
 	}
@@ -886,7 +960,7 @@ public:
 				Ability* current;
 				while ((current = iter.get()) != NULL) {
 					playability play = isPlayable(current, piece->position);
-					if (play != unplayable && current->hasProperty(current->DIRECTLY_PLAYABLE)) {
+					if (play != unplayable && current->hasFlag(current->DIRECTLY_PLAYABLE)) {
 						Position from = piece->position, to = piece->position + current->totalMovement;
 
 						if (squares[to.toArrayIndex()] != NULL && squares[to.toArrayIndex()]->isKing) {
@@ -936,7 +1010,7 @@ public:
 	// fen Q7/2k5/2p2p1R/8/7B/6PP/5PK1/8 w - - 10 39
 
 	evaluation simpleEval() {
-		float material = 0;//materialWhite - materialBlack;
+		float material = materialWhite - materialBlack;
 
 		float movesWhite = 0;
 		for (Piece* piece : piecesWhite) {
@@ -970,7 +1044,7 @@ public:
 				movesBlack += sqrt(thisPieceMoves);
 			}
 		}
-		return { material + (movesWhite - movesBlack), NULL, NULL };
+		return { material/1000 + (movesWhite - movesBlack)/200, NULL, NULL };
 	}
 
 	void evaluateMove(Piece* piece, Ability* current, int depth, float& alpha, float& beta, evaluation& best, bool& couldBeStalemate) {
@@ -997,6 +1071,9 @@ public:
 	evaluation alphaBeta(int depth, float alpha, float beta) {
 		if (blackWon || whiteWon) {
 			return { (blackWon ? -MATE+move : MATE-move) , NULL, NULL };
+		}
+		if (isDraw) {
+			return { 0,NULL,NULL };
 		}
 
 		evaluation best = { blackToPlay ? INFINITY : -INFINITY , NULL,NULL };
@@ -1027,7 +1104,7 @@ public:
 
 		bool couldBeStalemate = true;
 
-		if (done!=NULL && done->eval.bestMove != NULL && done->depth<depth) {
+		if (done!=NULL && done->eval.bestMove != NULL && done->eval.bestMoveFrom!=NULL && done->depth<depth) {
 			Ability* move = done->eval.bestMove;
 			Piece* piece = done->eval.bestMoveFrom;
 			if (piece->alive && piece->isBlack == blackToPlay && isPlayableIncludingPrevious(move, piece->position)) {
@@ -1050,7 +1127,7 @@ public:
 
 				playability play = isPlayable(current, piece->position);
 				iter.next(play);
-				if (play != unplayable && current->hasProperty(current->DIRECTLY_PLAYABLE)) {
+				if (play != unplayable && current->hasFlag(current->DIRECTLY_PLAYABLE)) {
 					evaluateMove(piece, current, depth, alpha, beta, best, couldBeStalemate);
 				}
 			}
@@ -1086,6 +1163,11 @@ public:
 
 		stored++;
 		return best;
+	}
+
+	bool isStalemate() {
+		evaluation eval = alphaBeta(1, -INFINITY, INFINITY);
+		return (eval.value == 0) && (eval.bestMove == NULL) && (eval.bestMoveFrom = NULL);
 	}
 
 	void resetSearchData() {
@@ -1127,8 +1209,8 @@ Ability* Ability::parseString(string input) {
 	bool failed = false;
 	for (int i = 0; i < options; i++) {
 		Ability* a = new Ability[1];
-		a->properties |= LAST_OPTION;
-		int read = a->readProperties(parts[i]);
+		a->flags |= LAST_OPTION;
+		int read = a->readFlags(parts[i]);
 		if (read == -1) {
 			failed = true;
 		}
@@ -1302,9 +1384,9 @@ void userInput(std::string in, Game& b) {
 				ability->del();
 				return;
 			}
-			t->init(id, ability, false, 3);
+			t->init(id, ability, id=='k');
 		}
-		pieceTypes.push_back(new PieceType(id, ability, false, 3));
+		pieceTypes.push_back(new PieceType(id, ability, false));
 		return;
 	}
 	if (action == "fen") {
@@ -1322,31 +1404,39 @@ int main()
 	zobristInit();
 
 	Ability* bishop = makePieceType("symmetric 11>22>33>44>55>66>77");
-	pieceTypes.push_back(new PieceType('b', bishop, false, 3));
+	pieceTypes.push_back(new PieceType('b', bishop, false));
 
 	Ability* king = makePieceType("symmetric 11,10");
-	pieceTypes.push_back(new PieceType('k', king, true, 100));
+	pieceTypes.push_back(new PieceType('k', king, true));
 
 	Ability* horse = makePieceType("symmetric 12,21");
-	pieceTypes.push_back(new PieceType('n', horse, false, 3));
+	pieceTypes.push_back(new PieceType('n', horse, false));
 
 	Ability* queen = makePieceType("symmetric 11>22>33>44>55>66>77,  01>02>03>04>05>06>07");
-	pieceTypes.push_back(new PieceType('q', queen, false, 9));
+	pieceTypes.push_back(new PieceType('q', queen, false));
 
 	Ability* rook = makePieceType("symmetric 10>20>30>40>50>60>70");
-	pieceTypes.push_back(new PieceType('r', rook, false, 5));
+	pieceTypes.push_back(new PieceType('r', rook, false));
 
 	Ability* pawn = makePieceType("01n=q>02nf,11c=q,-11c=q");
-	pieceTypes.push_back(new PieceType('p', pawn, false, 1));
+	pieceTypes.push_back(new PieceType('p', pawn, false));
 
+	/*
 	std::cout << "\n\n";
+	std::cout << "bishop: " << bishop->estimateValue() << "\n";
+	std::cout << "king: " << king->estimateValue() << "\n";
+	std::cout << "horse: " << horse->estimateValue() << "\n";
+	std::cout << "queen: " << queen->estimateValue() << "\n";
+	std::cout << "pawn: " << pawn->estimateValue() << "\n";
+	std::cout << "rook: " << rook->estimateValue() << "\n";
+	*/
 
 
 	Game b;
-	//b.loadFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 0"); // default
+	b.loadFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 0"); // default
 	//tests:
 	//b.loadFen("rnbqkbnr/8/8/8/8/8/8/RNBQKBNR - - - - -");
-	b.loadFen("R1K5/8/8/8/8/5k2/8/8 w - - 0 0"); // rook mate
+	//b.loadFen("R1K5/8/8/8/8/5k2/8/8 w - - 0 0"); // rook mate
 	//b.loadFen("1K6/8/8/7k/8/8/8/6R1 b - - 0 0"); // y u repeat
 	//b.loadFen("NBK5/8/8/8/8/5k2/8/8 w - - 0 0"); // bishop knight mate
 	std::cout << b.fen()<<"\n";
@@ -1370,10 +1460,27 @@ int main()
 				userInput(s, b);
 			}
 		}
+		else if (b.isDraw) {
+			std::cout << "Draw by repetition!\n";
+			while (b.isDraw) {
+				string s;
+				std::getline(std::cin, s);
+				userInput(s, b);
+			}
+		}
+		else if (b.isStalemate()) {
+			std::cout << "Draw by stalemate!\n";
+			while (b.isStalemate()) {
+				string s;
+				std::getline(std::cin, s);
+				userInput(s, b);
+			}
+		}
 		if ((b.blackToPlay && b.blackIsAi) || (!b.blackToPlay && b.whiteIsAi)) {
 			std::cout << "bot is thinking...\n";
 			Game::evaluation eval = b.RunAi(depth);
 			std::cout << "eval: " << eval.value << " " << '\n';
+			std::cout << "simpler eval: " << b.simpleEval().value << "\n";
 			b.makeMove(eval.bestMoveFrom->position, eval.bestMove);
 		}
 		else {
