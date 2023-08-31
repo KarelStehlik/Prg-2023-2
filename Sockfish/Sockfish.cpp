@@ -1007,6 +1007,10 @@ public:
 		t->upperBound = delayMate(t->upperBound, t->move);
 		t->move = move;
 
+		if (t->lowerBound > t->eval.value || t->upperBound < t->eval.value) {
+			//std::cout << t->lowerBound << " " << t->eval.value << " " << t->upperBound << "\n";
+		}
+
 		return t;
 	}
 
@@ -1101,11 +1105,11 @@ public:
 			}
 		}
 
+		float ogAlpha = alpha, ogBeta = beta;
+
 		if (depth == 0) {
 			return simpleEval();
 		}
-
-		float ogAlpha = alpha, ogBeta = beta;
 
 		bool couldBeStalemate = true;
 
@@ -1129,7 +1133,6 @@ public:
 					couldBeStalemate = false;
 					break;
 				}
-
 				playability play = isPlayable(current, piece->position);
 				iter.next(play);
 				if (play != unplayable && current->hasFlag(current->DIRECTLY_PLAYABLE)) {
@@ -1152,6 +1155,9 @@ public:
 			done->lowerBound = -INFINITY;
 			done->upperBound = INFINITY;
 		}
+		if (done->depth > depth) {
+			return best;
+		}
 		if (best.value <= ogAlpha) {
 			done->upperBound = best.value;
 		}
@@ -1165,6 +1171,9 @@ public:
 		done->depth = depth;
 		done->move = move;
 		done->eval = best;
+		if (done->lowerBound > done->eval.value || done->upperBound < done->eval.value) {
+		//	std::cout << done->lowerBound << " " << done->eval.value << " " << done->upperBound << "\n";
+		}
 
 		stored++;
 		return best;
@@ -1438,10 +1447,10 @@ int main()
 
 
 	Game b;
-	b.loadFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 0"); // default
+	//b.loadFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 0"); // default
 	//tests:
 	//b.loadFen("rnbqkbnr/8/8/8/8/8/8/RNBQKBNR - - - - -");
-	//b.loadFen("R1K5/8/8/8/8/5k2/8/8 w - - 0 0"); // rook mate
+	b.loadFen("2K5/8/8/8/8/5k2/8/R7 w - - 0 0"); // rook mate
 	//b.loadFen("1K6/8/8/7k/8/8/8/6R1 b - - 0 0"); // y u repeat
 	//b.loadFen("NBK5/8/8/8/8/5k2/8/8 w - - 0 0"); // bishop knight mate
 	std::cout << b.fen()<<"\n";
