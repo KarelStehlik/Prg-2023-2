@@ -456,6 +456,10 @@ public:
 
 class Game {
 public:
+
+	constexpr static int searchTimeSoftCap = 1000000;
+	constexpr static int searchTimeHardCap = 5000000;
+
 	struct MoveRecord {
 		Position from, to;
 		Piece* captured;
@@ -492,13 +496,12 @@ public:
 	};
 
 	struct Transposition {
-		int depth;
-		int move;
+		int lowerBoundDepth;
+		int upperBoundDepth;
 		int pieces;
 		int timesUsed;
-		evaluation eval;
-		float lowerBound;
-		float upperBound;
+		evaluation lowerEval;
+		evaluation upperEval;
 	};
 
 	std::unordered_map<uint64_t, Transposition> transpositionTable;
@@ -565,9 +568,6 @@ public:
 		if (target!= NULL) {
 			halfMovesWithoutCapture = 0;
 			piecesOnBoard--;
-			if (!(target->position == to)) {
-				std::cout << "????";
-			}
 			hash ^= target->hash();
 			if (target->isBlack) {
 				materialBlack -= target->materialValue;
@@ -740,14 +740,15 @@ public:
 			return;
 		}
 
-		// todo: validate fields castling, enpassant
+		// not implemented: validate fields castling, enpassant
 		
 		piecesWhite.clear();
 		piecesBlack.clear();
 
 		halfMovesWithoutCapture= std::stoi(fields[4]);
-		move= std::stoi(fields[5]);
 		blackToPlay = fields[1] == "b";
+		move= std::stoi(fields[5]) * 2 + blackToPlay;
+		
 
 		for (int i = 0; i < 64; i++) {
 			squares[i] = NULL;
@@ -894,9 +895,6 @@ public:
 				return false;
 			}
 		}
-		if (squares[startingSquare.toArrayIndex()]->ability != a) {
-			return false;
-		}
 		return true;
 	}
 
@@ -941,10 +939,11 @@ public:
 	}
 
 	void cleanTranspositionTable() {
-		int threshold = 5;
+		int threshold = 1;
 		while (transpositionTable.size() > maxTableSize) {
 			auto itr = transpositionTable.begin();
 			while (itr != transpositionTable.end()) {
+				itr->second.timesUsed--;
 				if (shouldDeleteTransposition(itr->second, threshold)) {
 					itr = transpositionTable.erase(itr);
 				}
@@ -952,7 +951,7 @@ public:
 					++itr;
 				}
 			}
-			threshold *= 2;
+			//threshold *= 2;
 		}
 	}
 
@@ -981,14 +980,14 @@ public:
 	
 	int maxMoveReached = 0;
 
-	float delayMate(float value, int moveInserted) {
+	float delayMate(float value, int moves) {
 		if (!isMate(value)) {
 			return value;
 		}
 		if (value < 0) {
-			return value + move-moveInserted;
+			return value + moves;
 		}
-		return value -move+moveInserted;
+		return value - moves;
 	}
 
 	void storeTransposition(Transposition trans) {
@@ -1001,15 +1000,6 @@ public:
 			return NULL;
 		}
 		Transposition* t = &found->second;
-
-		t->eval.value = delayMate(t->eval.value, t->move);
-		t->lowerBound = delayMate(t->lowerBound, t->move);
-		t->upperBound = delayMate(t->upperBound, t->move);
-		t->move = move;
-
-		if (t->lowerBound > t->eval.value || t->upperBound < t->eval.value) {
-			//std::cout << t->lowerBound << " " << t->eval.value << " " << t->upperBound << "\n";
-		}
 
 		return t;
 	}
@@ -1077,6 +1067,8 @@ public:
 		}
 	}
 
+	std::chrono::system_clock::time_point searchStart;
+
 	evaluation alphaBeta(int depth, float alpha, float beta) {
 		if (blackWon || whiteWon) {
 			return { (blackWon ? -MATE+move : MATE-move) , NULL, NULL };
@@ -1084,40 +1076,61 @@ public:
 		if (isDraw) {
 			return { 0,NULL,NULL };
 		}
+		if (depth == 0) {
+			return simpleEval();
+		}
+		auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now() - searchStart).count();
+		if (elapsed > searchTimeHardCap) {
+			return { blackToPlay ? INFINITY : -INFINITY, NULL, NULL };
+		}
 
 		evaluation best = { blackToPlay ? INFINITY : -INFINITY , NULL,NULL };
 
 		Transposition* done = getTransposition();
 
 		bool loadedTransposition = done != NULL;
-
+		
 		if (loadedTransposition) {
-			if (done->depth >= depth) {
-				done->timesUsed++;
-				loaded++;
+			float lb = delayMate(done->lowerEval.value, move);
+			float ub = delayMate(done->upperEval.value, move);
+			loaded++;
+			
+			if (lb >= beta && done->lowerBoundDepth >= depth) {
+				evaluation result = done->lowerEval;
+				result.value = lb;
+				return result;
+			}
+			if (ub <= alpha && done->upperBoundDepth >= depth) {
+				evaluation result = done->upperEval;
+				result.value = ub;
+				return result;
+			}
 
-				alpha = max(alpha, done->lowerBound);
-				beta = min(beta, done->upperBound);
-
-				if (alpha >= beta) {
-					return done->eval;
-				}
+			if (done->lowerBoundDepth >= depth && lb > alpha) {
+				alpha = lb;
+				evaluation result = done->lowerEval;
+				result.value = lb;
+				best = result;
+			}
+			if (done->upperBoundDepth >= depth && ub <beta) {
+				beta =ub;
+				evaluation result = done->upperEval;
+				result.value = ub;
+				best = result;
 			}
 		}
 
 		float ogAlpha = alpha, ogBeta = beta;
-
-		if (depth == 0) {
-			return simpleEval();
-		}
-
 		bool couldBeStalemate = true;
 
-		if (done!=NULL && done->eval.bestMove != NULL && done->eval.bestMoveFrom!=NULL && done->depth<depth) {
-			Ability* move = done->eval.bestMove;
-			Piece* piece = done->eval.bestMoveFrom;
-			if (piece->alive && piece->isBlack == blackToPlay && isPlayableIncludingPrevious(move, piece->position)) {
-				evaluateMove(piece, move, depth, alpha, beta, best, couldBeStalemate);
+		if (done != NULL) {
+			evaluation& currentEval = blackToPlay ? done->lowerEval : done->upperEval;
+			if (currentEval.bestMove != NULL && currentEval.bestMoveFrom != NULL) {
+				Ability* move = currentEval.bestMove;
+				Piece* piece = currentEval.bestMoveFrom;
+				if (piece->alive && piece->isBlack == blackToPlay && isPlayableIncludingPrevious(move, piece->position)) {
+					evaluateMove(piece, move, depth, alpha, beta, best, couldBeStalemate);
+				}
 			}
 		}
 		std::vector<Piece*>& pieces = blackToPlay ? piecesBlack : piecesWhite;
@@ -1148,59 +1161,52 @@ public:
 		}
 
 		if (!loadedTransposition) {
-			storeTransposition({ depth, move, piecesOnBoard, 0, best, -INFINITY, INFINITY });
+			storeTransposition({ 0, 0, piecesOnBoard, 0, {-INFINITY, NULL, NULL}, {INFINITY, NULL, NULL} });
 		}
 		done = getTransposition();
-		if (done->depth < depth) {
-			done->lowerBound = -INFINITY;
-			done->upperBound = INFINITY;
-		}
-		if (done->depth > depth) {
-			return best;
-		}
-		if (best.value <= ogAlpha) {
-			done->upperBound = best.value;
-		}
-		if(best.value > ogAlpha && best.value < ogBeta) {
-			done->lowerBound = best.value;
-			done->upperBound = best.value;
-		}
-		if(best.value >= ogBeta) {
-			done->lowerBound = best.value;
-		}
-		done->depth = depth;
-		done->move = move;
-		done->eval = best;
-		if (done->lowerBound > done->eval.value || done->upperBound < done->eval.value) {
-		//	std::cout << done->lowerBound << " " << done->eval.value << " " << done->upperBound << "\n";
-		}
+		float obv = best.value;
+		best.value = delayMate(best.value,- move);
 
+		if (obv < ogBeta && depth>done->upperBoundDepth) {
+			done->upperEval = best;
+			done->upperBoundDepth = depth;
+		}
+		if(obv > ogAlpha && depth > done->lowerBoundDepth) {
+			done->lowerEval = best;
+			done->lowerBoundDepth = depth;
+		}
+		best.value = obv;
 		stored++;
 		return best;
 	}
 
 	bool isStalemate() {
-		evaluation eval = alphaBeta(1, -INFINITY, INFINITY);
-		return (eval.value == 0) && (eval.bestMove == NULL) && (eval.bestMoveFrom = NULL);
+		searchStart = std::chrono::system_clock::now();
+		evaluation eval = alphaBeta(2, -INFINITY, INFINITY);
+		return (eval.value == 0) && (eval.bestMove == NULL) && (eval.bestMoveFrom == NULL);
 	}
 
-	void resetSearchData() {
+	void cleanSearchData() {
 		cleanTranspositionTable();
 	}
 
 	evaluation RunAi(int maxDepth) {
 		stored = 0;
 		loaded = 0;
-		double elapsedUs = 0;
-		auto start = std::chrono::system_clock::now();
+		searchStart = std::chrono::system_clock::now();
+		long long elapsed=0;
 		evaluation currentEval;
 		int i = 0;
-		for (; i <= maxDepth && elapsedUs<300000; i++) {
-			resetSearchData();
-			currentEval=alphaBeta(i, -INFINITY, INFINITY);
-			elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now() - start).count();
+		for (; i <= maxDepth && elapsed<searchTimeSoftCap; i++) {
+			cleanSearchData();
+			auto newEval= alphaBeta(i, -INFINITY, INFINITY);
+			elapsed = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now() - searchStart).count();
+			if (newEval.bestMove != NULL && elapsed<searchTimeHardCap) {
+				currentEval = newEval;
+			}
+			
 		}
-		std::cout << "searched to depth " << i << " in " << elapsedUs/1000000 << " s\n";
+		std::cout << "searched to depth " << i << " in " << (double)elapsed/1000000 << " s\n";
 		std::cout << stored << " transpositions saved, " << transpositionTable.size() << " kept, " << loaded << " loaded\n";
 		std::cout << isCheck(!blackToPlay) << "\n";
 		return currentEval;
@@ -1449,10 +1455,12 @@ int main()
 	Game b;
 	//b.loadFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 0"); // default
 	//tests:
-	//b.loadFen("rnbqkbnr/8/8/8/8/8/8/RNBQKBNR - - - - -");
-	b.loadFen("2K5/8/8/8/8/5k2/8/R7 w - - 0 0"); // rook mate
+	//b.loadFen("R1K5/8/8/8/8/5k2/8/8 w - - 0 0"); // rook mate
 	//b.loadFen("1K6/8/8/7k/8/8/8/6R1 b - - 0 0"); // y u repeat
-	//b.loadFen("NBK5/8/8/8/8/5k2/8/8 w - - 0 0"); // bishop knight mate
+	//b.loadFen("8/8/3B4/5N2/8/8/2K5/k7 w - - 0 0"); // sacced his king once for some reason
+	//b.loadFen("NBK5/8/8/8/8/5k2/8/8 w - - 0 0"); // bishop knight mate (may take a while)
+	b.loadFen("1B5k/5K2/8/3N4/8/8/8/8 w - - 0 1"); // pls see M4 (also stalemate test)
+	//b.loadFen("5K1k/8/8/6B1/8/8/6N1/8 b - - 1 1"); // bot got really confused for a moment?
 	std::cout << b.fen()<<"\n";
 
 	constexpr int depth = 100;
