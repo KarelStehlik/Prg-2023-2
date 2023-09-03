@@ -1,5 +1,5 @@
 [general]
-Hello user!
+Greetings!
 In this simple console app, you can play chess, optionally with custom pieces and/or against an AI.
 The game is played until king capture.
 Available commands: piece, fen, reset, takeback, toggleBlackBot, toggleWhiteBot, help.
