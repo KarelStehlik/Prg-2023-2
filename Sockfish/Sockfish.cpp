@@ -815,10 +815,10 @@ public:
 				}
 				else {
 					if (squares[pieceIndex]->isBlack) {
-						std::cout << hue::light_green << " " << (char)(squares[pieceIndex]->typeId) << " ";
+						std::cout << hue::red << " " << (char)(squares[pieceIndex]->typeId) << " ";
 					}
 					else {
-						std::cout << hue::red << " " << (char)(squares[pieceIndex]->typeId + 'A' - 'a') << " ";
+						std::cout << hue::light_green << " " << (char)(squares[pieceIndex]->typeId + 'A' - 'a') << " ";
 					}
 				}
 				std::cout << hue::reset;
@@ -1227,9 +1227,8 @@ public:
 			}
 			
 		}
-		std::cout << "searched to depth " << i << " in " << (double)elapsed/1000000 << " s\n";
-		std::cout << stored << " transpositions saved, " << transpositionTable.size() << " kept, " << loaded << " loaded\n";
-		std::cout << isCheck(!blackToPlay) << "\n";
+		//std::cout << "searched to depth " << i << " in " << (double)elapsed/1000000 << " s\n";
+		//std::cout << stored << " transpositions saved, " << transpositionTable.size() << " kept, " << loaded << " loaded\n";
 		return currentEval;
 	}
 };
@@ -1417,7 +1416,7 @@ void userInput(std::string in, Game& b) {
 		}
 		PieceType* t = getPieceType(id);
 		if (t != NULL) {
-			std::cout << "'" << id << "' is an existing piece type. Type 'yes' to overwrite it, anything else to cancel.\n";
+			std::cout << "'" << id << "' is an existing piece type. Type 'yes' to overwrite it and reset the current game, anything else to cancel.\n";
 			std::string prompt;
 			std::getline(std::cin, prompt);
 			if (prompt != "yes") {
@@ -1425,7 +1424,9 @@ void userInput(std::string in, Game& b) {
 				ability->del();
 				return;
 			}
+			t->ability->del();
 			t->init(id, ability, id=='k');
+			b.loadFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 0");
 		}
 		pieceTypes.push_back(new PieceType(id, ability, false));
 		return;
@@ -1474,14 +1475,15 @@ int main()
 
 
 	Game b;
-	//b.loadFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 0"); // default
+	b.loadFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 0"); // default
+
 	//tests:
 	//b.loadFen("R1K5/8/8/8/8/5k2/8/8 w - - 0 0"); // rook mate
 	//b.loadFen("1K6/8/8/7k/8/8/8/6R1 b - - 0 0"); // y u repeat
 	//b.loadFen("8/8/3B4/5N2/8/8/2K5/k7 w - - 0 0"); // sacced his king once for some reason
 	//b.loadFen("NBK5/8/8/8/8/5k2/8/8 w - - 0 0"); // bishop knight mate (may take a while)
 	//b.loadFen("1B5k/5K2/8/3N4/8/8/8/8 w - - 0 1"); // pls see M4 (also stalemate test)
-	b.loadFen("5K1k/8/8/6B1/8/8/6N1/8 b - - 1 1"); // bot got really confused for a moment?
+	//b.loadFen("5K1k/8/8/6B1/8/8/6N1/8 b - - 1 1"); // bot got really confused for a moment?
 
 	std::cout << b.fen()<<"\n";
 
@@ -1524,7 +1526,7 @@ int main()
 			std::cout << "bot is thinking...\n";
 			Game::evaluation eval = b.RunAi(depth);
 			std::cout << "eval: " << eval.value << " " << '\n';
-			std::cout << "simpler eval: " << b.simpleEval().value << "\n";
+			//std::cout << "simpler eval: " << b.simpleEval().value << "\n";
 			b.makeMove(eval.bestMoveFrom->position, eval.bestMove);
 		}
 		else {

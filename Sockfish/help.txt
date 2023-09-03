@@ -1,12 +1,13 @@
 [general]
 Hello user!
-In this simple console app you can play chess, optionally with custom pieces and/or against an AI.
+In this simple console app. you can play chess, optionally with custom pieces and/or against an AI.
+The game is played until king capture.
 Available commands: piece, fen, reset, takeback, toggleBlackBot, toggleWhiteBot, help.
 Type help <command> to see info about that command.
 Default behaviour (with no command) is to make a move.
 
 [move]
-You make a move by typing the starting square and the target square, for examlpe e2e4 as the first move.
+You make a move by typing the starting square and the target square, for example e2e4 as the first move.
 
 [piece]
 Create a custom piece
@@ -17,7 +18,7 @@ optional arguments are:
 Example, bishop: piece b mirror xy 11>22>33>44>55>66>77
 - symmetric: the piece can also move rotated by 90, 180 or 270 degrees
 Example, knight: piece n symmetric 12,21
-- combine: doesn't expect a usual move desription, but rather a list of pieces that the new piece combines
+- combine: doesn't expect a usual move description, but rather a list of pieces that the new piece combines
 Example, queen: piece q combine r,b
 
 move description:
@@ -29,6 +30,7 @@ Any position may have a series of tags after it:
 c - must capture with this move
 n - cannot capture with this move
 =X - promotes to X if landing on the last rank. X must exist as a piece when using this tag, and later overwriting X will change the piece this promotes to. 
+f - this can only be the first move with a piece
 
 
 [fen]
@@ -43,10 +45,10 @@ Loads the default board position. Keeps any piece definitions. Equivalent to "fe
 Unmakes the last full move.
 
 [toggleBlackBot]
-Toggles whether black is played by a bot, default true.
+Toggles whether black (red) is played by a bot, default true.
 
 [toggleWhiteBot]
-Toggles whether white is played by a bot, default false.
+Toggles whether white (green) is played by a bot, default false.
 
 [help]
 Without arguments, displays the entire help file.

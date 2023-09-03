@@ -1,25 +1,25 @@
 ### Údržba dat ###
+
 [ Ability ]
+Abychom mohli vytvářet figurky, musíme nějak uchovávat informace o tom, co figurka umí. K tomu slouží třída Ability. Tyto uchováváme ve stromu. Každá má vlastnosti next (ukazatel na dítě) a LAST_OPTION (pokud není nastaveno, tak dále v paměti leží soused).
+Třída také obsahuje přibližnou metodu k odhadování ceny (estimateValue), která náhodně generuje šachovnice a kouká se, kolik políček je tímto Ability dosažitelných. Takovou funkci potřebujeme, aby počítač tušil, jak hrát s figurkami které nikdy neviděl.
 
-Abychom mohli vytvářet figurky, musíme nějak uchovávat informace o tom, co figurka umí. K tomu slouží třída Ability. Tyto uchováváme ve stromu, každá má vlastnosti next (ukazatel na dítě) a LAST_OPTION (pokud není nastaveno, tak dále v paměti leží soused).
-Třída také obsahuje přibližnou metodu k odhadování ceny (estimateValue), která náhodně generuje šachovnice a kouká se, kolik políček je tímto Ability dosažitelných. Takovou funkci potřebujeme, aby počítač tušil jak hrát.
-
-Různé typy figurek uchováváme ve vectoru pieceTypes, kde pro každou je uložen její Ability, obrácená Ability pro černé figurky,  odhadovaná cena a to zda je králem (momentálně je král vždy figurka se symbolem K).
+Různé typy figurek uchováváme ve vectoru pieceTypes, kde pro každou je uložen její Ability, obrácená Ability pro černé figurky, odhadovaná cena, a zda je králem (momentálně je král vždy figurka se symbolem K).
 
 [ Game ]
+třída Game obsahuje jak stav šachovnice, tak logiku pro hru proti počítači. Nikdy ji nekopírujeme, průchod minimaxovým stromem používá metody makeMove a unmakeMove, které se navzájem vyruší. Data, která drží, jsou:
+- pole o velikosti 64 pro šachovnici
+- 2 pole figurek, pro bílé a černé
+- Tabulka předpočítaných evaluací (zdaleka největší). To jest std::map klíčovaný pomocí čísla, které se nazývá Zobrist hash.
+- std::stack s historií tahů, který je potřeba k provedení unmakeMove
 
-třída Game obsahuje jak stav šachovnice, tak logiku pro hru proti počítači. Nikdy ji nekopírujeme, průchod minimaxovým stromem používá metody makeMove a unmakeMove, které se navzájem vyruší. Data která drží jsou:
-pole o velikosti 64 pro šachovnici
-2 pole figurek, pro bílé a černé
-Tabulka předpočítaných evaluací (zdaleka největší). To jest std::map klíčovaný pomocí čísla, které se nazývá Zobrist hash.
-std::stack s historií tahů, který je potřeba k provedení unmakeMove
 
 ### Šachový engine ###
 
 Pro výpočet nejlepšího tahu používáme prohledávání do hloubky, alpha-beta ořezávání a tabulky transpozic.
 
-Prohledávání do hloubky rekurzivně projde všechny možnosti, jak může hra v následujících pár tazích pokračovat. Přitom jsme schopni zvolit "nejlepší" castu minimaxovým algoritmem, kde odspoda pčítáme hodnoty podstromů. Pokud je v kořeni černý hráč vždy zvolí podstrom s nejmenší hodnotou a bílý s největší. V případě této aplikace strom neuchovám celý, jen zpouštím rekurzi.
+Prohledávání do hloubky rekurzivně projde všechny možnosti, jak může hra v následujících pár tazích pokračovat. Přitom jsme schopni zvolit "nejlepší" cestu minimaxovým algoritmem, kde odspoda pčítáme hodnoty podstromů. Pokud je v kořeni černý hráč vždy zvolí podstrom s nejmenší hodnotou a bílý s největší. V případě této aplikace strom neuchovám celý, jen spouštím rekurzi.
 
-Alpha-beta ořezávání je způsob, jak můžeme dostat stejný výsledek ale ušetřit si nějakou práci. Alpha je dolní odhad hodnoty stromu, beta je horní odhad. Nápad je, že pokud si je bílý jistý že může vynutit minimálně alpha, a v nějakém podstromu si je černý jistý že může vynutit méně, pak ten podstrom už není třeba dále pohledávat. Dle mého názoru je vše jasnější z obrázkem, například https://www.researchgate.net/profile/Neil-Henning/publication/268426213/figure/fig3/AS:669502962405401@1536633353520/An-example-of-alpha-beta-pruning-1.ppm
+Alpha-beta ořezávání je způsob, jak můžeme dostat stejný výsledek ale ušetřit si nějakou práci. Alpha je dolní odhad hodnoty stromu, beta je horní odhad. Nápad je, že pokud si je bílý už jistý že může vynutit minimálně alpha, a v nějakém podstromu si je černý jistý že může vynutit méně, pak ten podstrom už není třeba dále pohledávat (a naopak). Dle mého názoru je vše jasnější s obrázkem, například https://static.javatpoint.com/tutorial/ai/images/alpha-beta-pruning-step8.png
 
-Tabulka transpozic pomáhá, abuchom nemuseli moc opakovat počítání, zvlášť když zbývá málo figurek. když o nějakém podstromu něco zjistíme, tak si to uložíme do tabulky s jeho hashem. Ovšem musíme uložit i hloubku do které jsme to zjistili, abychom nenačítali slabší výsledky. Také si musíme uvědomit, že s alpha-beta ořezáváním nemusíme prohledat calý podstrom, takže do tabulky nemůžeme uložit jednoznačné ohodnocení každého vstupu. Pokud ořízneme podle alpha-beta, znamená to pouze že jsme našli nějakou horní nebo dolní mez.
+Tabulka transpozic pomáhá, abychom nemuseli moc opakovat počítání, zvlášť když zbývá málo figurek. když o nějakém podstromu něco zjistíme, tak si to uložíme do tabulky pod Zobrist hashem pozice. Ovšem musíme uložit i hloubku do které jsme něco zjistili, abychom nespoléhali na slabší výsledky. Také si musíme uvědomit, že s alpha-beta ořezáváním nemusíme prohledat celý podstrom, takže do tabulky někdy nemůžeme uložit jednoznačné ohodnocení. Pokud ořízneme podle alpha-beta, znamená to pouze že jsme našli nějakou horní nebo dolní mez, tak uložíme pouze tu.
