@@ -1181,6 +1181,10 @@ public:
 
 		}
 
+		elapsed = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now() - searchStart).count();
+		if (elapsed > searchTimeHardCap) {
+			return{ blackToPlay ? INFINITY : -INFINITY, NULL, NULL };
+		}
 		if (!loadedTransposition) {
 			storeTransposition({ 0, 0, piecesOnBoard, 0, {-INFINITY, NULL, NULL}, {INFINITY, NULL, NULL} });
 		}
@@ -1217,6 +1221,7 @@ public:
 			auto newEval= alphaBeta(i, -INFINITY, INFINITY);
 
 			elapsed = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now() - searchStart).count();
+
 			if ((newEval.bestMove != NULL) && (elapsed<searchTimeHardCap)) {
 				currentEval = newEval;
 			}
@@ -1471,12 +1476,13 @@ int main()
 	Game b;
 	//b.loadFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 0"); // default
 	//tests:
-	b.loadFen("R1K5/8/8/8/8/5k2/8/8 w - - 0 0"); // rook mate
+	//b.loadFen("R1K5/8/8/8/8/5k2/8/8 w - - 0 0"); // rook mate
 	//b.loadFen("1K6/8/8/7k/8/8/8/6R1 b - - 0 0"); // y u repeat
 	//b.loadFen("8/8/3B4/5N2/8/8/2K5/k7 w - - 0 0"); // sacced his king once for some reason
 	//b.loadFen("NBK5/8/8/8/8/5k2/8/8 w - - 0 0"); // bishop knight mate (may take a while)
 	//b.loadFen("1B5k/5K2/8/3N4/8/8/8/8 w - - 0 1"); // pls see M4 (also stalemate test)
-	//b.loadFen("5K1k/8/8/6B1/8/8/6N1/8 b - - 1 1"); // bot got really confused for a moment?
+	b.loadFen("5K1k/8/8/6B1/8/8/6N1/8 b - - 1 1"); // bot got really confused for a moment?
+
 	std::cout << b.fen()<<"\n";
 
 	constexpr int depth = 100;
