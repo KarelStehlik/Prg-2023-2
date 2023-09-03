@@ -28,8 +28,10 @@ Obsahuje řadu pozic, symboly "," a ">". Pozice "11" znamená pohyb o 1 doprava 
 Pozici v popisu může následovat nějaká kombinace vlastností:
 c - musí brát
 n - nemůže brát
-=X - povýší se na X pokud skončí na poslední řadě. V době zadávání musí X existovat, a změny k X ovlivní i to, na co se tato figurka povýší.
+=X - povýší se na X pokud skončí na poslední řadě. V době zadávání musí X existovat, a pozdější změny k X ovlivní i to, na co se tato figurka povýší.
 f - možno zahrát pouze pokud se figurka zatím nepohnula
+všechny tyto vlastnosti kombinuje pěšec:
+piece p 01n=q>02nf,11c=q,-11c=q
 
 
 [fen]

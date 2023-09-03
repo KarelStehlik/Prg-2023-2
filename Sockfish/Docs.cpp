@@ -15,7 +15,6 @@ void printDocs(std::string category) {
                 std::getline(myfile, line);
                 std::cout << line << '\n';
             }
-            return;
         }
         else {
             bool printing = false;
@@ -24,23 +23,24 @@ void printDocs(std::string category) {
             while (myfile.good())
             {
                 std::getline(myfile, line);
-                if (line == lookingFor) {
-                    printing = true;
-                }
                 if (printing) {
                     if (line != "" && line[0] == '[') {
-                        return;
+                        break;
                     }
                     std::cout << line << '\n';
                 }
+                if (line == lookingFor) {
+                    printing = true;
+                    std::cout << line << '\n';
+                }
+            }
+            if (!printing) {
+                std::cout << "Docs for '" << category << "' not found.\n";
             }
         }
         myfile.close();
     }
     else {
         std::cout << "Unable to open docs file";
-        return;
     }
-
-    std::cout << "Docs for '" << category << "' not found.\n";
 }

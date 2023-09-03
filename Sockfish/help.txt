@@ -1,6 +1,6 @@
 [general]
 Hello user!
-In this simple console app. you can play chess, optionally with custom pieces and/or against an AI.
+In this simple console app, you can play chess, optionally with custom pieces and/or against an AI.
 The game is played until king capture.
 Available commands: piece, fen, reset, takeback, toggleBlackBot, toggleWhiteBot, help.
 Type help <command> to see info about that command.
@@ -13,30 +13,32 @@ You make a move by typing the starting square and the target square, for example
 Create a custom piece
 Expects a piece identifier, at most one optional argument and a move description.
 
+move description:
+Consists of a chain of positions, "," and ">". A move description of "11" means the piece can move up and right diagonally by 1 square.
+"11, -1-1, 1-1, -11" means it can move diagonally by 1 in any direction, and "11>22" means it can move diagonally by (1,1) and, if that square is clear, can continue to (2,2).
+Bracketing is possible, for example "piece x symmetric 11>(21,12)" is a possible implementation of a knight that doesn't jump. however, making a bracket the condition for another move is not supported, such as "(10,01)>11".
+
+Any position in the chain may have a series of tags after it:
+c - must capture with this move
+n - cannot capture with this move
+=X - promotes to X if landing on the last rank. X must exist as a piece when using this tag, and later overwriting X will change the piece this promotes to. 
+f - this can only be the first move with a piece
+A pawn uses all of the above:
+piece p 01n=q>02nf,11c=q,-11c=q
+
 optional arguments are:
-- mirror <xy>: the piece movement is mirrored along the Y and/or X axis
+- mirror <xy>: the piece movement is mirrored in X and/or Y coordinates.
 Example, bishop: piece b mirror xy 11>22>33>44>55>66>77
 - symmetric: the piece can also move rotated by 90, 180 or 270 degrees
 Example, knight: piece n symmetric 12,21
 - combine: doesn't expect a usual move description, but rather a list of pieces that the new piece combines
 Example, queen: piece q combine r,b
 
-move description:
-Consists of a chain of positions, "," and ">". A move description of "11" means the piece can move up and right diagonally by 1 square.
-"11, -1-1, 1-1, -11" means it can move diagonally by 1 in any direction, and "11>22" means it can move diagonally by (1,1) and if that square is clear, can continue to (2,2).
-Bracketing is possible, for example "piece x symmetric 11>(21,12)" is a possible implementation of a knight that doesn't jump. however, making a bracket the condition for another move is not supported, such as "(10,01)>11".
-
-Any position may have a series of tags after it:
-c - must capture with this move
-n - cannot capture with this move
-=X - promotes to X if landing on the last rank. X must exist as a piece when using this tag, and later overwriting X will change the piece this promotes to. 
-f - this can only be the first move with a piece
-
 
 [fen]
 Without arguments, prints the fen of the current position.
 With an argument, attempts to load a given FEN.
-Castling and en passant is not supported, so those fields will be blank in the generated FEN and ignored in the loaded one.
+Castling and en passant are not supported, so those fields will be blank in the generated FEN and ignored in the loaded one.
 
 [reset]
 Loads the default board position. Keeps any piece definitions. Equivalent to "fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 0"
