@@ -485,7 +485,7 @@ public:
 	bool isDraw = false;
 	int maxTableSize = 500000;
 
-	static inline bool isMate(int eval) {
+	static inline bool isMate(float eval) {
 		return (eval > 1000 || eval < -1000) && eval!=INFINITY && eval!=-INFINITY;
 	}
 
@@ -951,7 +951,6 @@ public:
 					++itr;
 				}
 			}
-			//threshold *= 2;
 		}
 	}
 
@@ -1008,6 +1007,35 @@ public:
 
 	// fen Q7/2k5/2p2p1R/8/7B/6PP/5PK1/8 w - - 10 39
 
+	bool isStalemate() {
+		if (isCheck(!blackToPlay)) {
+			return false;
+		}
+
+		std::vector<Piece*>& pieces = blackToPlay ? piecesBlack : piecesWhite;
+
+		for (Piece* piece : pieces) {
+			if (!piece->alive) {
+				continue;
+			}
+			Ability::MoveIterator iter = Ability::MoveIterator(piece->ability);
+			Ability* current;
+			while ((current = iter.get()) != NULL) {
+				playability play = isPlayable(current, piece->position);
+				iter.next(play);
+				if (play != unplayable && current->hasFlag(current->DIRECTLY_PLAYABLE)) {
+					makeMove(piece->position, current);
+					bool check = isCheck(blackToPlay);
+					unmakeMove();
+					if (!check) {
+						return false;
+					}
+				}
+			}
+		}
+		return true;
+	}
+
 	evaluation simpleEval() {
 		float material = materialWhite - materialBlack;
 
@@ -1046,20 +1074,18 @@ public:
 		return { material/1000 + (movesWhite - movesBlack)/200, NULL, NULL };
 	}
 
-	void evaluateMove(Piece* piece, Ability* current, int depth, float& alpha, float& beta, evaluation& best, bool& couldBeStalemate) {
+	void evaluateMove(Piece* piece, Ability* current, int depth, float& alpha, float& beta, evaluation& best) {
 		makeMove(piece->position, current);
 		float value = alphaBeta(depth - 1, alpha, beta).value;
 		unmakeMove();
 
 		if (!blackToPlay) {
-			couldBeStalemate &= value == -MATE +move+2;
 			if (value > best.value) {
 				best = { value, piece, current };
 			}
 			alpha = max(alpha, value);
 		}
 		else {
-			couldBeStalemate &= value == MATE -move-2;
 			if (value < best.value) {
 				best = { value, piece, current };
 			}
@@ -1078,6 +1104,9 @@ public:
 		}
 		if (depth == 0) {
 			return simpleEval();
+		}
+		if (isStalemate()) {
+			return { 0.f, NULL, NULL };
 		}
 		auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now() - searchStart).count();
 		if (elapsed > searchTimeHardCap) {
@@ -1121,7 +1150,6 @@ public:
 		}
 
 		float ogAlpha = alpha, ogBeta = beta;
-		bool couldBeStalemate = true;
 
 		if (done != NULL) {
 			evaluation& currentEval = blackToPlay ? done->lowerEval : done->upperEval;
@@ -1129,7 +1157,7 @@ public:
 				Ability* move = currentEval.bestMove;
 				Piece* piece = currentEval.bestMoveFrom;
 				if (piece->alive && piece->isBlack == blackToPlay && isPlayableIncludingPrevious(move, piece->position)) {
-					evaluateMove(piece, move, depth, alpha, beta, best, couldBeStalemate);
+					evaluateMove(piece, move, depth, alpha, beta, best);
 				}
 			}
 		}
@@ -1143,21 +1171,15 @@ public:
 			Ability* current;
 			while ((current = iter.get()) != NULL) {
 				if (alpha >= beta) {
-					couldBeStalemate = false;
 					break;
 				}
 				playability play = isPlayable(current, piece->position);
 				iter.next(play);
 				if (play != unplayable && current->hasFlag(current->DIRECTLY_PLAYABLE)) {
-					evaluateMove(piece, current, depth, alpha, beta, best, couldBeStalemate);
+					evaluateMove(piece, current, depth, alpha, beta, best);
 				}
 			}
 
-		}
-		if (couldBeStalemate) {
-			if (!isCheck(!blackToPlay)) {
-				return { 0.f, NULL, NULL };
-			}
 		}
 
 		if (!loadedTransposition) {
@@ -1178,12 +1200,6 @@ public:
 		best.value = obv;
 		stored++;
 		return best;
-	}
-
-	bool isStalemate() {
-		searchStart = std::chrono::system_clock::now();
-		evaluation eval = alphaBeta(2, -INFINITY, INFINITY);
-		return (eval.value == 0) && (eval.bestMove == NULL) && (eval.bestMoveFrom == NULL);
 	}
 
 	void cleanSearchData() {
@@ -1459,8 +1475,8 @@ int main()
 	//b.loadFen("1K6/8/8/7k/8/8/8/6R1 b - - 0 0"); // y u repeat
 	//b.loadFen("8/8/3B4/5N2/8/8/2K5/k7 w - - 0 0"); // sacced his king once for some reason
 	//b.loadFen("NBK5/8/8/8/8/5k2/8/8 w - - 0 0"); // bishop knight mate (may take a while)
-	b.loadFen("1B5k/5K2/8/3N4/8/8/8/8 w - - 0 1"); // pls see M4 (also stalemate test)
-	//b.loadFen("5K1k/8/8/6B1/8/8/6N1/8 b - - 1 1"); // bot got really confused for a moment?
+	//b.loadFen("1B5k/5K2/8/3N4/8/8/8/8 w - - 0 1"); // pls see M4 (also stalemate test)
+	b.loadFen("5K1k/8/8/6B1/8/8/6N1/8 b - - 1 1"); // bot got really confused for a moment?
 	std::cout << b.fen()<<"\n";
 
 	constexpr int depth = 100;
