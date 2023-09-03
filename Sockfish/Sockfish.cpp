@@ -1137,21 +1137,20 @@ public:
 
 			if (done->lowerBoundDepth >= depth && lb > alpha) {
 				alpha = lb;
-				evaluation result = done->lowerEval;
-				result.value = lb;
-				best = result;
 			}
 			if (done->upperBoundDepth >= depth && ub <beta) {
-				beta =ub;
+				beta = ub;
+			}
+			if (alpha >= beta) {
 				evaluation result = done->upperEval;
 				result.value = ub;
-				best = result;
+				return result;
 			}
 		}
 
 		float ogAlpha = alpha, ogBeta = beta;
 
-		if (done != NULL) {
+		if (done != NULL&&false) {
 			evaluation& currentEval = blackToPlay ? done->lowerEval : done->upperEval;
 			if (currentEval.bestMove != NULL && currentEval.bestMoveFrom != NULL) {
 				Ability* move = currentEval.bestMove;
