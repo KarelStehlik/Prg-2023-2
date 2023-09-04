@@ -1,7 +1,7 @@
 ### Údržba dat ###
 
 [ Ability ]
-Abychom mohli vytvářet figurky, musíme nějak uchovávat informace o tom, co figurka umí. K tomu slouží třída Ability. Tyto uchováváme ve stromu. Každá má vlastnosti next (ukazatel na dítě) a LAST_OPTION (pokud není nastaveno, tak dále v paměti leží soused).
+Abychom mohli vytvářet figurky, musíme nějak uchovávat informace o tom, co figurka umí. K tomu slouží třída Ability. Tyto uchováváme ve stromu. Každá má vlastnosti next (ukazatel na dítě) a bit LAST_OPTION (pokud není nastaven, tak dále v paměti leží soused).
 Třída také obsahuje přibližnou metodu k odhadování ceny (estimateValue), která náhodně generuje šachovnice a kouká se, kolik políček je tímto Ability dosažitelných. Takovou funkci potřebujeme, aby počítač tušil, jak hrát s figurkami které nikdy neviděl.
 
 Různé typy figurek uchováváme ve vectoru pieceTypes, kde pro každou je uložen její Ability, obrácená Ability pro černé figurky, odhadovaná cena, a zda je králem (momentálně je král vždy figurka se symbolem K).
@@ -11,6 +11,7 @@ třída Game obsahuje jak stav šachovnice, tak logiku pro hru proti počítači
 - pole o velikosti 64 pro šachovnici
 - 2 pole figurek, pro bílé a černé
 - Tabulka předpočítaných evaluací (zdaleka největší). To jest std::map klíčovaný pomocí čísla, které se nazývá Zobrist hash.
+- Tabulka hashů pozic, které už nastaly (pro detekci toho, když se tahy opakují)
 - std::stack s historií tahů, který je potřeba k provedení unmakeMove
 
 

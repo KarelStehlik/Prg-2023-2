@@ -73,6 +73,7 @@ public:
 private:
 	int16_t flags;
 
+	// returns length of input read
 	int readFlags(string input) {
 		int posLen = 2;
 		if (input[0] == '-') {
@@ -129,6 +130,7 @@ public:
 		promotionType = NULL;
 	}
 
+	// fills in the "previous" fields of everything this points to
 	void fillPreviousness(Ability* prev) {
 		this->prev = prev;
 		if (next != NULL) {
@@ -139,6 +141,7 @@ public:
 		}
 	}
 
+	// counts neighbot=rs in the tree
 	int countOptions() {
 		int count = 0;
 		for (Ability* checking = this;; checking++) {
@@ -149,7 +152,7 @@ public:
 		}
 	}
 
-	// invalidates this pointer
+	// invalidates "this" pointer, moves to newAdress instead
 	int moveInMemory(Ability* newAdress) {
 		Ability* addr = newAdress;
 		int moved = 0;
@@ -168,7 +171,7 @@ public:
 		}
 	}
 
-	// invalidates pi=ointers in input vector
+	// invalidates pointers in input vector, makes a new tree
 	static Ability* combine(const std::vector<Ability*>& in) {
 		int totalSize = 0;
 		for (Ability* a : in) {
@@ -233,6 +236,7 @@ public:
 		}
 	}
 
+	// by 90 degrees counterclockwise
 	void rotate() {
 		int x = totalMovement.x;
 		totalMovement.x = -totalMovement.y;
@@ -274,6 +278,7 @@ public:
 		Ability* get() {
 			return current;
 		}
+		// expects the playability of this->get()
 		Ability* next(playability currentPlayability) {
 			if (current!=NULL && current->next != NULL && currentPlayability == playable) {
 				current = current->next;
@@ -290,6 +295,7 @@ public:
 		}
 	};
 
+	// full comparison
 	bool eq(const Ability* other) {
 		if (!(totalMovement == other->totalMovement) || flags != other->flags) {
 			return false;
@@ -306,17 +312,6 @@ public:
 			return true;
 		}
 		return (this + 1)->eq(other + 1);
-	}
-
-	void check() {
-		print();
-		std::cout << "\n";
-		MoveIterator iter = MoveIterator(this);
-		while (iter.get() != NULL) {
-			std::cout << "(" << iter.get()->totalMovement.x << "," << iter.get()->totalMovement.y << ") ";
-			iter.next(playable);
-		}
-		std::cout << "\n";
 	}
 
 	float estimateValue() {
@@ -383,7 +378,7 @@ public:
 	void init(char id, Ability* ability, bool isKing) {
 		this->id = id;
 		this->ability = ability;
-		this->invertedAbility = Ability::copy(ability);
+		this->invertedAbility = Ability::copy(ability); // for black pieces
 		invertedAbility->invertY();
 		this->isKing = isKing;
 		estimatedValue = ability->estimateValue()*1000;
@@ -396,6 +391,7 @@ public:
 
 std::vector<PieceType*> pieceTypes;
 
+// NULL if none exists
 PieceType* getPieceType(char c) {
 	c = tolower(c);
 	for (int i = 0; i < pieceTypes.size();i++) {
@@ -455,11 +451,11 @@ public:
 };
 
 class Game {
-public:
-
+private:
+	constexpr static float MATE_EVAL = 10000;
+	constexpr static int maxTableSize = 500000;
 	constexpr static int searchTimeSoftCap = 1000000;
 	constexpr static int searchTimeHardCap = 5000000;
-
 	struct MoveRecord {
 		Position from, to;
 		Piece* captured;
@@ -467,7 +463,8 @@ public:
 		PieceType* promotedFrom;
 		int halfMoves;
 	};
-
+	std::unordered_map<uint64_t, int> repetitionTable;
+public:
 	Piece* squares[64];
 	std::stack<MoveRecord> moveHistory;
 	std::vector<Piece*> piecesWhite;
@@ -475,15 +472,14 @@ public:
 	int materialWhite=0, materialBlack=0;
 	bool whiteWon = false, blackWon = false;
 	uint64_t hash = 0;
-	int move = 0;
+	int move = 0; // halfmoves since game start
 	bool blackToPlay = false;
-	static constexpr float MATE = 10000;
 	int piecesOnBoard = 0;
 	int halfMovesWithoutCapture = 0;
 	bool whiteIsAi = false;
 	bool blackIsAi = true;
-	bool isDraw = false;
-	int maxTableSize = 500000;
+	bool drawByRepetition = false;
+	bool drawBy50 = false;
 
 	static inline bool isMate(float eval) {
 		return (eval > 1000 || eval < -1000) && eval!=INFINITY && eval!=-INFINITY;
@@ -506,8 +502,7 @@ public:
 
 	std::unordered_map<uint64_t, Transposition> transpositionTable;
 
-	std::unordered_map<uint64_t, int> repetitionTable;
-
+	// returns the current FEN. fields 3 and 4 (castling and en passant) are empty.
 	string fen() {
 		string result = "";
 		for (int i = 0; i < 8; i++) {
@@ -558,9 +553,13 @@ public:
 
 		moveHistory.push({ from, to, target, moving->hasMoved ,moving->pieceType, halfMovesWithoutCapture });
 		halfMovesWithoutCapture++;
+		drawBy50 = halfMovesWithoutCapture >= 100;
 
 		if ((to.y == 7 || to.y == 0) && ability->promotionType!=NULL) {
+			int& material = moving->isBlack ? materialBlack : materialWhite;
+			material -= moving->materialValue;
 			moving->updateType(ability->promotionType);
+			material += moving->materialValue;
 		}
 		moving->move(to);
 		moving->hasMoved = true;
@@ -589,7 +588,7 @@ public:
 		if (found != repetitionTable.end()) {
 			found->second++;
 			if (found->second >= 3) {
-				isDraw = true;
+				drawByRepetition = true;
 			}
 		}
 		else {
@@ -597,12 +596,18 @@ public:
 		}
 	}
 
+	// fully cancels out the last makeMove
 	void unmakeMove() {
+		if (moveHistory.empty()) {
+			std::cout << "Attempting to unmake a move that doesn't exist\n";
+			return;
+		}
+
 		auto found = repetitionTable.find(hash);
 		if (found != repetitionTable.end()) {
 			found->second--;
 			if (found->second == 2) {
-				isDraw = false;
+				drawByRepetition = false;
 			}
 		}
 		else {
@@ -614,6 +619,7 @@ public:
 		hash ^= getPlayerHash();
 		MoveRecord lastMove = moveHistory.top();
 		halfMovesWithoutCapture = lastMove.halfMoves;
+		drawBy50 = halfMovesWithoutCapture >= 100;
 		moveHistory.pop();
 		int fai = lastMove.from.toArrayIndex(), tai = lastMove.to.toArrayIndex();
 		Piece* moving = squares[tai];
@@ -625,7 +631,10 @@ public:
 		moving->hasMoved = lastMove.hasMovedBefore;
 
 		if (moving->pieceType != lastMove.promotedFrom) {
+			int& material = moving->isBlack ? materialBlack : materialWhite;
+			material -= moving->materialValue;
 			moving->updateType(lastMove.promotedFrom);
+			material += moving->materialValue;
 		}
 		squares[tai] = lastMove.captured;
 		if (lastMove.captured != NULL) {
@@ -699,51 +708,64 @@ public:
 
 
 		//validate half move clock
-		try {
-			const int i{ std::stoi(fields[4])};
-			if (i < 0 || i>99) {
-				std::cout << "Error: half move clock is out of range 1-99, is '" << fields[4] << "'\n";
+		{
+			try {
+				const int i{ std::stoi(fields[4]) };
+				if (i < 0 || i>99) {
+					std::cout << "Error: half move clock is out of range 1-99, is '" << fields[4] << "'\n";
+					error = true;
+				}
+			}
+			catch (std::invalid_argument const& ex)
+			{
+				std::cout << "Error: invalid argument for half move clock: '" << fields[4] << "'\n";
 				error = true;
 			}
-		}
-		catch (std::invalid_argument const& ex)
-		{
-			std::cout << "Error: invalid argument for half move clock: '" << fields[4] << "'\n";
-			error = true;
-		}
-		catch (std::out_of_range const& ex)
-		{
-			std::cout << "Error: invalid argument for half move clock: '" << fields[4] << "'\n";
-			error = true;
+			catch (std::out_of_range const& ex)
+			{
+				std::cout << "Error: invalid argument for half move clock: '" << fields[4] << "'\n";
+				error = true;
+			}
 		}
 		
 		// validate total moves
-		try {
-			const int i{ std::stoi(fields[5]) };
-			if (i < 0) {
-				std::cout << "Error: moves played cannot be less than 0, is '" << fields[4] << "'\n";
+		{
+			try {
+				const int i{ std::stoi(fields[5]) };
+				if (i < 0) {
+					std::cout << "Error: moves played cannot be less than 0, is '" << fields[4] << "'\n";
+					error = true;
+				}
+			}
+			catch (std::invalid_argument const& ex)
+			{
+				std::cout << "Error: invalid argument for moves played: '" << fields[4] << "'\n";
 				error = true;
 			}
-		}
-		catch (std::invalid_argument const& ex)
-		{
-			std::cout << "Error: invalid argument for moves played: '" << fields[4] << "'\n";
-			error = true;
-		}
-		catch (std::out_of_range const& ex)
-		{
-			std::cout << "Error: invalid argument for moves played: '" << fields[4] << "'\n";
-			error = true;
-		}
+			catch (std::out_of_range const& ex)
+			{
+				std::cout << "Error: invalid argument for moves played: '" << fields[4] << "'\n";
+				error = true;
+			}
 
-		if (error) {
-			return;
+			if (error) {
+				return;
+			}
 		}
 
 		// not implemented: validate fields castling, enpassant
 		
+		for (Piece* p : piecesBlack) {
+			delete p;
+		}
+		for (Piece* p : piecesWhite) {
+			delete p;
+		}
 		piecesWhite.clear();
 		piecesBlack.clear();
+		hash = 0; // there should be no need to reset the hash, can't hurt though
+		transpositionTable.clear();
+		repetitionTable.clear();
 
 		halfMovesWithoutCapture= std::stoi(fields[4]);
 		blackToPlay = fields[1] == "b";
@@ -754,17 +776,9 @@ public:
 			squares[i] = NULL;
 		}
 
-		for (Piece* p : piecesBlack) {
-			delete p;
-		}
-		for (Piece* p : piecesWhite) {
-			delete p;
-		}
-
-		piecesBlack.clear();
-		piecesWhite.clear();
 		piecesOnBoard = 0;
 		
+		// no clear() function for a stack???
 		while (!moveHistory.empty()) {
 			moveHistory.pop();
 		}
@@ -859,6 +873,7 @@ public:
 		return capture;
 	}
 
+	// checks if any ability in the given tree can move by a given displacement
 	Ability* searchPlayability(Position from, Ability* a, Position displacement) {
 
 		Ability::MoveIterator iter = Ability::MoveIterator(a);
@@ -874,6 +889,7 @@ public:
 		return NULL;
 	}
 
+	// checks the thing on "from" can move to "to"
 	Ability* isPlayable(Position from, Position to) {
 		if (!from.isValidPosition() || !to.isValidPosition()) {
 			return NULL;
@@ -885,6 +901,7 @@ public:
 		return searchPlayability(from, p->ability, to - from);
 	}
 
+	// fully checks if the given ability can be played from the given square
 	bool isPlayableIncludingPrevious(Ability* a, Position startingSquare) {
 		if (isPlayable(a, startingSquare)==unplayable) {
 			return false;
@@ -898,20 +915,20 @@ public:
 		return true;
 	}
 
-	bool parseMove(string in) {
+	void parseMove(string in) {
 		if (in == "takeback") {
 			unmakeMove();
 			unmakeMove();
-			return false;
+			return;
 		}
 		std::vector<std::string> words = splitOffFirstWord(in, ' ');
 		if (words[0] == "fen") {
 			if (words.size() != 2) {
 				std::cout << "error loading fen";
-				return false;
+				return;
 			}
 			loadFen(words[1]);
-			return true;
+			return;
 		}
 
 		int x1, y1, x2, y2;
@@ -922,14 +939,14 @@ public:
 		Ability* p = isPlayable({ x1,y1 }, { x2,y2 });
 		if (p==NULL) {
 			std::cout << "that's not a valid move\n";
-			return false;
+			return;
 		}
 		makeMove({ x1,y1 }, p);
-		return true;
+		return;
 	}
 
 	bool shouldDeleteTransposition(Transposition& t, int usedThreshold) {
-		if (t.pieces < piecesOnBoard) {
+		if (t.pieces > piecesOnBoard) {
 			return true;
 		}
 		if (t.timesUsed < usedThreshold) {
@@ -937,7 +954,7 @@ public:
 		}
 		return false;
 	}
-
+	// make sure the table is smaller thanmaxTableSize. degrades old entries, unused ones, throws away all with more pieces than currently exist
 	void cleanTranspositionTable() {
 		int threshold = 1;
 		while (transpositionTable.size() > maxTableSize) {
@@ -1004,8 +1021,6 @@ public:
 	}
 
 	int stored = 0, loaded = 0;
-
-	// fen Q7/2k5/2p2p1R/8/7B/6PP/5PK1/8 w - - 10 39
 
 	bool isStalemate() {
 		if (isCheck(!blackToPlay)) {
@@ -1097,9 +1112,9 @@ public:
 
 	evaluation alphaBeta(int depth, float alpha, float beta) {
 		if (blackWon || whiteWon) {
-			return { (blackWon ? -MATE+move : MATE-move) , NULL, NULL };
+			return { (blackWon ? -MATE_EVAL+move : MATE_EVAL-move) , NULL, NULL };
 		}
-		if (isDraw) {
+		if (drawByRepetition) {
 			return { 0,NULL,NULL };
 		}
 		if (depth == 0) {
@@ -1478,12 +1493,14 @@ int main()
 	b.loadFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 0"); // default
 
 	//tests:
-	//b.loadFen("R1K5/8/8/8/8/5k2/8/8 w - - 0 0"); // rook mate
+	b.loadFen("R1K5/8/8/8/8/5k2/8/8 w - - 0 0"); // rook mate
 	//b.loadFen("1K6/8/8/7k/8/8/8/6R1 b - - 0 0"); // y u repeat
 	//b.loadFen("8/8/3B4/5N2/8/8/2K5/k7 w - - 0 0"); // sacced his king once for some reason
 	//b.loadFen("NBK5/8/8/8/8/5k2/8/8 w - - 0 0"); // bishop knight mate (may take a while)
 	//b.loadFen("1B5k/5K2/8/3N4/8/8/8/8 w - - 0 1"); // pls see M4 (also stalemate test)
 	//b.loadFen("5K1k/8/8/6B1/8/8/6N1/8 b - - 1 1"); // bot got really confused for a moment?
+	//b.loadFen("k7/8/8/8/8/8/8/5BKP b - - 1 1"); // no promotion
+	//b.loadFen("2k5/8/8/8/8/8/8/5KBP b - - 1 1"); // promotion
 
 	std::cout << b.fen()<<"\n";
 
@@ -1506,9 +1523,17 @@ int main()
 				userInput(s, b);
 			}
 		}
-		else if (b.isDraw) {
+		else if (b.drawByRepetition) {
 			std::cout << "Draw by repetition!\n";
-			while (b.isDraw) {
+			while (b.drawByRepetition) {
+				string s;
+				std::getline(std::cin, s);
+				userInput(s, b);
+			}
+		}
+		else if (b.drawBy50) {
+			std::cout << "Draw by 50 move rule!\n";
+			while (b.drawBy50) {
 				string s;
 				std::getline(std::cin, s);
 				userInput(s, b);
